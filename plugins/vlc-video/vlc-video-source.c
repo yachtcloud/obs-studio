@@ -726,6 +726,8 @@ static void vlcs_update(void *data, obs_data_t *settings)
 static void vlcs_stopped(const struct libvlc_event_t *event, void *data)
 {
   struct vlc_source *c = data;
+  source_restart(c, true);
+    return;
   if (!c->loop)
     obs_source_output_video(c->source, NULL);
 
