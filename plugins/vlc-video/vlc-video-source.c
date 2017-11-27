@@ -336,15 +336,13 @@ static bool rescue (void *data, bool debug)
     }
     
     if ( diff < 0 ) {
-      if ( debug )
-        printf("%s skipped to the past!\n", obs_source_get_name(c->source));
+      printf("%s skipped to the past!\n", obs_source_get_name(c->source));
 
       source_restart(c, debug);
     }
 
     if ( c->last_frame_at != NULL && (current_time - c->last_frame_at) > 10 ) {
-      if ( debug )
-        printf("%s 10 seconds without new frames!\n", obs_source_get_name(c->source));
+      printf("%s 10 seconds without new frames!\n", obs_source_get_name(c->source));
 
       source_restart(c, debug);
 
@@ -392,7 +390,7 @@ static void source_restart (void *data, bool debug)
 
 static void vlcs_video_display(void *data, void *picture)
 {
-  if ( !rescue(data, true) ) 
+  if ( !rescue(data, false) ) 
     return;
 
   struct vlc_source *c = data;
@@ -726,7 +724,7 @@ static void vlcs_update(void *data, obs_data_t *settings)
 static void vlcs_stopped(const struct libvlc_event_t *event, void *data)
 {
   struct vlc_source *c = data;
-  source_restart(c, true);
+  source_restart(c, false);
     return;
   if (!c->loop)
     obs_source_output_video(c->source, NULL);
