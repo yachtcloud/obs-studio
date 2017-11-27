@@ -76,6 +76,8 @@ bool opt_always_on_top = false;
 string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
+uint64_t opt_websocket_port;
+
 
 // AMD PowerXpress High Performance Flags
 #ifdef _MSC_VER
@@ -1891,6 +1893,22 @@ int main(int argc, char *argv[])
 
 		} else if (arg_is(argv[i], "--scene", nullptr)) {
 			if (++i < argc) opt_starting_scene = argv[i];
+
+		} else if (arg_is(argv[i], "--websocket-port", nullptr)) {
+	    if (++i < argc) {
+        char* str = (char *) bzalloc(sizeof(argv[i]));
+        strcpy(str, argv[i]);
+        uint64_t port;
+        if (!str || !*str)
+    	  	port = 0;
+        else
+        	if (str[0] == '0' && str[1] == 'x')
+        		port = strtoull(str + 2, NULL, 16);
+        	else
+        		port = strtoull(str, NULL, 10);
+
+			  opt_websocket_port = port;
+      }
 
 		} else if (arg_is(argv[i], "--minimize-to-tray", nullptr)) {
 			opt_minimize_tray = true;

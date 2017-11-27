@@ -47,6 +47,9 @@ template <typename T> inline size_t GetCallbackIdx(
 
 struct OBSStudioAPI : obs_frontend_callbacks {
 	OBSBasic *main;
+  uint64_t obs_frontend_get_opt_websocket_port() override {
+    return opt_websocket_port;
+  };
 	vector<OBSStudioCallback<obs_frontend_event_cb>> callbacks;
 	vector<OBSStudioCallback<obs_frontend_save_cb>> saveCallbacks;
 

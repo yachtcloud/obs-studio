@@ -151,6 +151,7 @@ EXPORT void obs_frontend_set_preview_program_mode(bool enable);
 EXPORT obs_source_t *obs_frontend_get_current_preview_scene(void);
 EXPORT void obs_frontend_set_current_preview_scene(obs_source_t *scene);
 
+EXPORT uint64_t obs_frontend_get_opt_websocket_port();
 /* ------------------------------------------------------------------------- */
 
 #ifdef __cplusplus

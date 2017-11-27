@@ -57,6 +57,13 @@ static char **convert_string_list(vector<string> &strings)
 
 /* ------------------------------------------------------------------------- */
 
+
+uint64_t obs_frontend_get_opt_websocket_port() {
+	return !!callbacks_valid()
+		? c->obs_frontend_get_opt_websocket_port()
+		: (uint64_t) 4444;
+}
+
 void *obs_frontend_get_main_window(void)
 {
 	return !!callbacks_valid()
