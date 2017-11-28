@@ -1924,10 +1924,10 @@ int main(int argc, char *argv[])
 
 		} else if (arg_is(argv[i], "--help", "-h")) {
 			std::cout <<
-			"--help, -h: Get list of available commands.\n" << 
+			"--help, -h: Get list of available commands.\n"
 				<< "\n" <<
 			"--disable-ui: Disable user interface at start.\n" <<
-			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
+			"--websocket-port <number>: Specify websocket port for obs-websockets.\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<
