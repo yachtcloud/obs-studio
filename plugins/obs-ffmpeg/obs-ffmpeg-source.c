@@ -39,6 +39,10 @@ struct ffmpeg_source {
 	bool media_valid;
 	bool destroy_media;
 
+  double source_frames;
+  unsigned long last_frame_at;
+  bool restarted;
+
 	struct SwsContext *sws_ctx;
 	int sws_width;
 	int sws_height;
@@ -232,9 +236,13 @@ static void get_audio(void *opaque, struct obs_source_audio *a)
 	obs_source_output_audio(s->source, a);
 }
 
+static void source_restart (void *data, bool debug);
+
 static void media_stopped(void *opaque)
 {
 	struct ffmpeg_source *s = opaque;
+  source_restart(s, false);
+    return;
 	if (s->is_clear_on_media_end) {
 		obs_source_output_video(s->source, NULL);
 		if (s->close_when_inactive && s->media_valid)
@@ -255,11 +263,96 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 				s->range);
 }
 
+
+static bool rescue (void *data, bool debug)
+{
+	struct ffmpeg_source *c = data;
+  double source_frames = obs_source_get_total_frames(c->source);
+  double diff;
+  time_t current_time = time(NULL);
+  struct tm * time_info;
+  char timeString[9];
+  bool attempting_restart;
+
+  if ( c->source_frames != 0 ) {
+
+    diff = (double) source_frames - c->source_frames;
+
+    if ( diff > 0 && c->last_frame_at != current_time ) {
+      
+      c->last_frame_at = current_time;
+      c->restarted = false;
+
+      if ( debug ) {
+        time_info = localtime((time_t) &current_time);
+        strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
+        printf("last_frame_at: %s, id: %s\n", timeString, obs_source_get_name(c->source));
+      }
+
+    }
+    
+    if ( diff < 0 ) {
+      printf("%s skipped to the past!\n", obs_source_get_name(c->source));
+
+      source_restart(c, debug);
+    }
+
+    if ( c->last_frame_at != NULL && (current_time - c->last_frame_at) > 10 ) {
+      printf("%s 10 seconds without new frames!\n", obs_source_get_name(c->source));
+
+      source_restart(c, debug);
+
+      // restart the counter so that the log message will appear again in the next 10 seconds
+      c->last_frame_at = current_time;
+    }
+  }
+
+  // update source_frames
+  c->source_frames = source_frames;
+
+  switch ( attempting_restart ) {
+    case true:
+      // stop 
+      return false;
+    
+    default:
+    case false:
+      // proceed
+      return true;
+  }
+
+}
+
+static void source_restart (void *data, bool debug)
+{
+
+	struct ffmpeg_source *c = data;
+  
+  if ( c->restarted == false ) {
+    if ( debug )
+      printf("%s restarting...\n", obs_source_get_name(c->source));
+    c->restarted = true;
+    
+    obs_source_output_video(c->source, NULL);
+    obs_source_update(c->source, NULL);
+
+    return true;
+  } else {
+    if ( debug )
+      printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
+    return false;
+  }
+}
+
+
 static void ffmpeg_source_tick(void *data, float seconds)
 {
 	UNUSED_PARAMETER(seconds);
 
 	struct ffmpeg_source *s = data;
+  if ( !rescue(data, true) ) 
+    return;
+
 	if (s->destroy_media) {
 		if (s->media_valid) {
 			mp_media_free(&s->media);
@@ -417,6 +510,8 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 
 	struct ffmpeg_source *s = bzalloc(sizeof(struct ffmpeg_source));
 	s->source = source;
+
+  s->source_frames = (double) 0;
 
 	s->hotkey = obs_hotkey_register_source(source,
 			"MediaSource.Restart",
