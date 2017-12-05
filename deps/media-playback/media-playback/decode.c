@@ -22,9 +22,11 @@ static AVCodec *find_hardware_decoder(enum AVCodecID id)
 	AVHWAccel *hwa = av_hwaccel_next(NULL);
 	AVCodec *c = NULL;
 
-	while (hwa) {
+  while (hwa) {
 		if (hwa->id == id) {
-			if (hwa->pix_fmt == AV_PIX_FMT_VDA_VLD ||
+			if (
+          hwa->pix_fmt == 129 ||
+          hwa->pix_fmt == AV_PIX_FMT_VDA_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_DXVA2_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_VAAPI_VLD) {
 				c = avcodec_find_decoder_by_name(hwa->name);
@@ -35,6 +37,11 @@ static AVCodec *find_hardware_decoder(enum AVCodecID id)
 
 		hwa = av_hwaccel_next(hwa);
 	}
+
+  if (c != NULL)
+    printf("[hwaccel] codec id %d found %s!\n", id, c->name);
+  else 
+    printf("[hwaccel] codec id %d NOT found!\n", id);
 
 	return c;
 }
