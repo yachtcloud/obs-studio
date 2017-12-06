@@ -73,6 +73,10 @@ bool opt_start_replaybuffer = false;
 bool opt_minimize_tray = false;
 bool opt_allow_opengl = false;
 bool opt_always_on_top = false;
+bool opt_cuda_decoding = false;
+bool get_opt_cuda_decoding () {
+  return opt_cuda_decoding;
+}
 string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
@@ -1873,6 +1877,9 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--always-on-top", nullptr)) {
 			opt_always_on_top = true;
 
+		} else if (arg_is(argv[i], "--cuda-decoding", nullptr)) {
+			opt_cuda_decoding = true;
+
 		} else if (arg_is(argv[i], "--unfiltered_log", nullptr)) {
 			unfiltered_log = true;
 
@@ -1927,7 +1934,8 @@ int main(int argc, char *argv[])
 			"--help, -h: Get list of available commands.\n"
 				<< "\n" <<
 			"--disable-ui: Disable user interface at start.\n" <<
-			"--websocket-port <number>: Specify websocket port for obs-websockets.\n"
+			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
+			"--cuda-decoding: Enable cuda decoding.\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<

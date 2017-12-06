@@ -117,6 +117,8 @@ struct obs_modeless_ui {
  */
 EXPORT void obs_register_modeless_ui(const struct obs_modeless_ui *info);
 
+EXPORT bool get_opt_cuda_decoding();
+
 /* ------------------------------------------------------------------------- */
 
 #define OBS_UI_SUCCESS   0

@@ -350,7 +350,7 @@ static void ffmpeg_source_tick(void *data, float seconds)
 	UNUSED_PARAMETER(seconds);
 
 	struct ffmpeg_source *s = data;
-  if ( !rescue(data, true) ) 
+  if ( !rescue(data, false) ) 
     return;
 
 	if (s->destroy_media) {

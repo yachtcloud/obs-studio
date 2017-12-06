@@ -16,6 +16,7 @@
 
 #include "decode.h"
 #include "media.h"
+#include <obs-ui.h>
 
 static AVCodec *find_hardware_decoder(enum AVCodecID id)
 {
@@ -24,8 +25,7 @@ static AVCodec *find_hardware_decoder(enum AVCodecID id)
 
   while (hwa) {
 		if (hwa->id == id) {
-			if (
-          hwa->pix_fmt == 129 ||
+			if ( (get_opt_cuda_decoding() && hwa->pix_fmt == 129) ||
           hwa->pix_fmt == AV_PIX_FMT_VDA_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_DXVA2_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_VAAPI_VLD) {
