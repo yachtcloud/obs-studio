@@ -184,6 +184,7 @@ extern bool opt_minimize_tray;
 extern bool opt_studio_mode;
 extern bool opt_disable_ui;
 extern bool opt_cuda_decoding;
+extern char *opt_filter;
 extern uint64_t opt_websocket_port;
 extern bool opt_allow_opengl;
 extern bool opt_always_on_top;

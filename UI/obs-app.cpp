@@ -77,6 +77,10 @@ bool opt_cuda_decoding = false;
 bool get_opt_cuda_decoding () {
   return opt_cuda_decoding;
 }
+char *opt_filter = NULL;
+char *get_opt_filter () {
+  return opt_filter;
+}
 string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
@@ -1892,6 +1896,9 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--startreplaybuffer", nullptr)) {
 			opt_start_replaybuffer = true;
 
+		} else if (arg_is(argv[i], "--filter", nullptr)) {
+			if (++i < argc) opt_filter = (char *)argv[i];
+
 		} else if (arg_is(argv[i], "--collection", nullptr)) {
 			if (++i < argc) opt_starting_collection = argv[i];
 
@@ -1935,7 +1942,8 @@ int main(int argc, char *argv[])
 				<< "\n" <<
 			"--disable-ui: Disable user interface at start.\n" <<
 			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
-			"--cuda-decoding: Enable cuda decoding.\n"
+			"--cuda-decoding: Enable cuda decoding.\n" <<
+      "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=320:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<

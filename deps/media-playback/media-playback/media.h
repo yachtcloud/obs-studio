@@ -45,7 +45,7 @@ typedef void (*mp_stop_cb)(void *opaque);
 struct mp_media {
 	AVFormatContext *fmt;
 
-	mp_video_cb v_preload_cb;
+  mp_video_cb v_preload_cb;
 	mp_stop_cb stop_cb;
 	mp_video_cb v_cb;
 	mp_audio_cb a_cb;

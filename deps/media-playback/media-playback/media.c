@@ -24,6 +24,7 @@
 
 #include <libavdevice/avdevice.h>
 #include <libavutil/imgutils.h>
+#include <unistd.h>
 
 static int64_t base_sys_ts = 0;
 
@@ -515,6 +516,15 @@ static int interrupt_callback(void *data)
 	return stop;
 }
 
+
+void my_log_callback(void *ptr, int level, const char *fmt, va_list vargs)
+{
+    if (level < 48)
+      vprintf(fmt, vargs);
+}
+
+
+
 static bool init_avformat(mp_media_t *m)
 {
 	AVInputFormat *format = NULL;
@@ -534,6 +544,12 @@ static bool init_avformat(mp_media_t *m)
 	m->fmt->interrupt_callback.callback = interrupt_callback;
 	m->fmt->interrupt_callback.opaque = m;
 
+
+  av_log_set_level(AV_LOG_ERROR);
+  av_log_set_callback(my_log_callback);
+
+  m->fmt->probesize = 50*1000000;
+
 	int ret = avformat_open_input(&m->fmt, m->path, format,
 			opts ? &opts : NULL);
 	av_dict_free(&opts);
@@ -543,13 +559,15 @@ static bool init_avformat(mp_media_t *m)
 		return false;
 	}
 
+  m->fmt->max_analyze_duration = 50*1000000;
+
 	if (avformat_find_stream_info(m->fmt, NULL) < 0) {
 		blog(LOG_WARNING, "MP: Failed to find stream info for '%s'",
 				m->path);
 		return false;
 	}
 
-	m->has_video = mp_decode_init(m, AVMEDIA_TYPE_VIDEO, m->hw);
+  m->has_video = mp_decode_init(m, AVMEDIA_TYPE_VIDEO, m->hw);
 	m->has_audio = mp_decode_init(m, AVMEDIA_TYPE_AUDIO, m->hw);
 
 	if (!m->has_video && !m->has_audio) {

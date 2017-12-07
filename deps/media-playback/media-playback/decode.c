@@ -25,7 +25,7 @@ static AVCodec *find_hardware_decoder(enum AVCodecID id)
 
   while (hwa) {
 		if (hwa->id == id) {
-			if ( (get_opt_cuda_decoding() && hwa->pix_fmt == 129) ||
+			if ( (get_opt_cuda_decoding() && hwa->pix_fmt == AV_PIX_FMT_CUDA) ||
           hwa->pix_fmt == AV_PIX_FMT_VDA_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_DXVA2_VLD ||
 			    hwa->pix_fmt == AV_PIX_FMT_VAAPI_VLD) {
@@ -39,9 +39,9 @@ static AVCodec *find_hardware_decoder(enum AVCodecID id)
 	}
 
   if (c != NULL)
-    printf("[hwaccel] codec id %d found %s!\n", id, c->name);
+    printf("hw decoding: codec id %d found %s!\n", id, c->name);
   else 
-    printf("[hwaccel] codec id %d NOT found!\n", id);
+    printf("hw decoding: codec id %d NOT found!\n", id);
 
 	return c;
 }
@@ -87,6 +87,8 @@ fail:
 #endif
 	return ret;
 }
+
+int init_filters(mp_media_t *m, const char *filters_descr, AVStream *s);
 
 bool mp_decode_init(mp_media_t *m, enum AVMediaType type, bool hw)
 {
@@ -151,7 +153,73 @@ bool mp_decode_init(mp_media_t *m, enum AVMediaType type, bool hw)
 
 	if (d->codec->capabilities & CODEC_CAP_TRUNCATED)
 		d->decoder->flags |= CODEC_FLAG_TRUNCATED;
+
+  if (get_opt_filter() != NULL && type == AVMEDIA_TYPE_VIDEO) {
+    const char *filters_descr = get_opt_filter();
+    printf("init_filter %s, source: %s\n", filters_descr, m->path);
+    init_filters(m, filters_descr, stream);
+  }
+
 	return true;
+}
+
+int init_filters(mp_media_t *m, const char *filters_descr, AVStream *s)
+{
+
+  struct mp_decode *d = &m->v;
+  AVCodecContext *dec_ctx = d->decoder;
+  avfilter_register_all();
+
+  char args[512];
+  int ret;
+  AVFilter *buffersrc  = avfilter_get_by_name("buffer");
+  AVFilter *buffersink = avfilter_get_by_name("buffersink");
+  AVFilterInOut *outputs = avfilter_inout_alloc();
+  AVFilterInOut *inputs  = avfilter_inout_alloc();
+  enum AVPixelFormat pix_fmts[] = { AV_PIX_FMT_GRAY8, AV_PIX_FMT_NONE, AV_PIX_FMT_CUDA, AV_PIX_FMT_NV12 };
+  AVBufferSinkParams *buffersink_params;
+  d->filter_graph = avfilter_graph_alloc();
+    
+  snprintf(args, sizeof(args), "%d:%d:%d:%d:%d:%d:%d",
+              dec_ctx->width, dec_ctx->height, dec_ctx->pix_fmt,
+              s->time_base.num, s->time_base.den,
+              s->sample_aspect_ratio.num, s->sample_aspect_ratio.den);
+
+  ret = avfilter_graph_create_filter(&d->buffersrc_ctx, buffersrc, "in",
+                                     args, NULL, d->filter_graph);
+  if (ret < 0) {
+      printf("Cannot create buffer source %d, args=\"%s\"\n", ret, args);
+      return ret;
+  }
+
+  /* buffer video sink: to terminate the filter chain. */
+  buffersink_params = av_buffersink_params_alloc();
+  buffersink_params->pixel_fmts = pix_fmts;
+  ret = avfilter_graph_create_filter(&d->buffersink_ctx, buffersink, "out",
+                                     NULL, buffersink_params, d->filter_graph);
+  av_free(buffersink_params);
+  if (ret < 0) {
+      printf("Cannot create buffer sink\n");
+      return ret;
+  }
+  /* Endpoints for the filter graph. */
+  outputs->name       = av_strdup("in");
+  outputs->filter_ctx = d->buffersrc_ctx;
+  outputs->pad_idx    = 0;
+  outputs->next       = NULL;
+
+  inputs->name       = av_strdup("out");
+  inputs->filter_ctx = d->buffersink_ctx;
+  inputs->pad_idx    = 0;
+  inputs->next       = NULL;
+
+  if ((ret = avfilter_graph_parse_ptr(d->filter_graph, filters_descr,
+                                  &inputs, &outputs, NULL)) < 0)
+      return ret;
+  
+  if ((ret = avfilter_graph_config(d->filter_graph, NULL)) < 0)
+      return ret;
+  return 0;
 }
 
 void mp_decode_clear_packets(struct mp_decode *d)
@@ -345,6 +413,36 @@ bool mp_decode_next(struct mp_decode *d)
 
 		d->last_duration = duration;
 		d->next_pts = d->frame_pts + duration;
+
+    // filter
+    if (get_opt_filter() != NULL && d->buffersrc_ctx) {
+
+      int r;
+      d->frame->pts = av_frame_get_best_effort_timestamp(d->frame);
+
+      /* push the decoded frame into the filtergraph */
+      if ((r=av_buffersrc_add_frame_flags(d->buffersrc_ctx, d->frame, AV_BUFFERSRC_FLAG_KEEP_REF)) < 0) {
+          av_log(NULL, AV_LOG_ERROR, "Error %d while feeding the filtergraph\n", r);
+          return ret;
+      } 
+       
+      AVFrame *frame = d->frame,
+        *filt_frame = av_frame_alloc();
+
+      r = av_buffersink_get_frame(d->buffersink_ctx, filt_frame);
+      if (r == AVERROR(EAGAIN) || r == AVERROR_EOF) {
+        av_frame_unref(filt_frame);
+        av_frame_free(&filt_frame);
+        return ret;
+      }
+      if (filt_frame) 
+        d->frame = filt_frame;
+
+      av_frame_unref(frame);      
+      av_frame_free(&frame);
+    }
+    // filter end
+    
 	}
 
 	return true;
