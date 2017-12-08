@@ -1950,7 +1950,8 @@ int main(int argc, char *argv[])
 			"--disable-ui: Disable user interface at start.\n" <<
 			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
 			"--cuda-decoding: Enable cuda decoding.\n" <<
-      "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=320:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'\n"
+      "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=275:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'\n" <<
+      "--disable-source-resizing: Disable resizing of source inputs.\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<
