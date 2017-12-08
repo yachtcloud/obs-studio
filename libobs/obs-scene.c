@@ -19,6 +19,7 @@
 #include "util/threading.h"
 #include "graphics/math-defs.h"
 #include "obs-scene.h"
+#include "obs-ui.h"
 
 /* NOTE: For proper mutex lock order (preventing mutual cross-locks), never
  * lock the graphics mutex inside either of the scene mutexes.
@@ -334,7 +335,9 @@ static void update_item_transform(struct obs_scene_item *item)
 
 	/* ----------------------- */
 
-	if (item->bounds_type != OBS_BOUNDS_NONE) {
+  bool opt_disable_source_resizing = get_opt_disable_source_resizing();
+
+	if (!opt_disable_source_resizing && item->bounds_type != OBS_BOUNDS_NONE) {
 		calculate_bounds_data(item, &origin, &scale, &cx, &cy);
 	} else {
 		cx = (uint32_t)((float)cx * scale.x);
@@ -344,8 +347,10 @@ static void update_item_transform(struct obs_scene_item *item)
 	add_alignment(&origin, item->align, (int)cx, (int)cy);
 
 	matrix4_identity(&item->draw_transform);
-	matrix4_scale3f(&item->draw_transform, &item->draw_transform,
-			scale.x, scale.y, 1.0f);
+  if (!opt_disable_source_resizing) {
+    matrix4_scale3f(&item->draw_transform, &item->draw_transform,
+        scale.x, scale.y, 1.0f);
+  }
 	matrix4_translate3f(&item->draw_transform, &item->draw_transform,
 			-origin.x, -origin.y, 0.0f);
 	matrix4_rotate_aa4f(&item->draw_transform, &item->draw_transform,

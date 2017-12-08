@@ -121,6 +121,8 @@ EXPORT bool get_opt_cuda_decoding();
 
 EXPORT char *get_opt_filter();
 
+EXPORT bool get_opt_disable_source_resizing();
+
 
 /* ------------------------------------------------------------------------- */
 

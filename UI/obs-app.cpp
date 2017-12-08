@@ -73,6 +73,10 @@ bool opt_start_replaybuffer = false;
 bool opt_minimize_tray = false;
 bool opt_allow_opengl = false;
 bool opt_always_on_top = false;
+bool opt_disable_source_resizing = false;
+bool get_opt_disable_source_resizing () {
+  return opt_disable_source_resizing;
+}
 bool opt_cuda_decoding = false;
 bool get_opt_cuda_decoding () {
   return opt_cuda_decoding;
@@ -1881,6 +1885,9 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--always-on-top", nullptr)) {
 			opt_always_on_top = true;
 
+		} else if (arg_is(argv[i], "--disable-source-resizing", nullptr)) {
+			opt_disable_source_resizing = true;
+
 		} else if (arg_is(argv[i], "--cuda-decoding", nullptr)) {
 			opt_cuda_decoding = true;
 
@@ -1943,7 +1950,7 @@ int main(int argc, char *argv[])
 			"--disable-ui: Disable user interface at start.\n" <<
 			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
 			"--cuda-decoding: Enable cuda decoding.\n" <<
-      "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=320:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'"
+      "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=320:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<
