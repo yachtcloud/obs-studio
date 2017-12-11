@@ -519,7 +519,7 @@ static int interrupt_callback(void *data)
 
 void my_log_callback(void *ptr, int level, const char *fmt, va_list vargs)
 {
-    if (level < 48)
+    if (false && level < 48)
       vprintf(fmt, vargs);
 }
 
