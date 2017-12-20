@@ -81,6 +81,11 @@ bool opt_cuda_decoding = false;
 bool get_opt_cuda_decoding () {
   return opt_cuda_decoding;
 }
+bool opt_copy = false;
+bool get_opt_copy () {
+  return opt_copy;
+}
+
 bool opt_preprocess = false;
 bool get_opt_preprocess () {
 	return opt_preprocess;
@@ -1905,6 +1910,9 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--disable-source-resizing", nullptr)) {
 			opt_disable_source_resizing = true;
 
+		} else if (arg_is(argv[i], "--copy", nullptr)) {
+			opt_copy = true;
+
 		} else if (arg_is(argv[i], "--cuda-decoding", nullptr)) {
 			opt_cuda_decoding = true;
 
@@ -1975,8 +1983,9 @@ int main(int argc, char *argv[])
 			"--cuda-decoding: Enable cuda decoding.\n" <<
       "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=275:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'\n" <<
       "--disable-source-resizing: Disable resizing of source inputs.\n"<<
-      "--preprocess: Enable cuda preprocessing of source inputs (supported input video codecs: h264, mpeg2video).\n"<<
-      "--rescale-script <string>: Specify the rescale script path, if cuda preprocessing is enabled (default 'rescale.py').\n"
+      "--preprocess: Enable preprocessing of source inputs (cuda by default; supported input video codecs: h264, mpeg2video).\n"<<
+      "--rescale-script <string>: Specify the rescale script path, if cuda preprocessing is enabled (default 'rescale.py').\n"<<
+      "--copy: If used with --preprocess, cuda is disabled.\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<

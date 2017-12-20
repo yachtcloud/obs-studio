@@ -639,9 +639,9 @@ char** explode(char delimiter, char* str, int **size) {
 static char ** probe(char *input) {
 	char *cmd = (char*) malloc(1000*sizeof(char));
 	char **codecs = (char **) malloc(5*sizeof(char *));
-	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1:nokey=1 ");
+	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1:nokey=1 \"");
 	strcat(cmd, input);
-	strcat(cmd, " | head -3");
+	strcat(cmd, "\" | head -3");
 
 	int *size = (int*) malloc(sizeof(int));
 	char **data = explode('\n', trim(run_sync(cmd)), &size);
@@ -737,10 +737,17 @@ char **can_preprocess(struct ffmpeg_source *s) {
 	
 void *preprocess_thread(struct ffmpeg_source *s) {
 
-	s->codecs = can_preprocess(s);
+	if (!get_opt_copy())
+		s->codecs = can_preprocess(s);
 
 	if (s->codecs == NULL) {
 		printf("preprocess: cannot preprocess sending the input source as is to '%s'\n", s->ffoutput);
+	}
+	if (get_opt_copy()) {
+		printf("preprocess: sending the input source as is to '%s'\n", s->ffoutput);
+	}
+
+	if (get_opt_copy() || s->codecs == NULL) {
 
 		char *ffcmd = (char *) malloc(2000*sizeof(char));
 		strcpy(ffcmd, "ffmpeg -i \"");

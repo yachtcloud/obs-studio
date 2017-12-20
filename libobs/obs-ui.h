@@ -129,6 +129,8 @@ EXPORT char *get_opt_rescale_script();
 
 EXPORT bool get_opt_preprocess();
 
+EXPORT bool get_opt_copy();
+
 
 /* ------------------------------------------------------------------------- */
 
