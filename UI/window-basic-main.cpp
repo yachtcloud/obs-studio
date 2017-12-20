@@ -55,6 +55,12 @@
 #include "volume-control.hpp"
 #include "remote-text.hpp"
 
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
 #if defined(_WIN32) && defined(ENABLE_WIN_UPDATER)
 #include "win-update/win-update.hpp"
 #endif
@@ -674,6 +680,86 @@ void OBSBasic::LogScenes()
 	blog(LOG_INFO, "------------------------------------------------");
 }
 
+
+
+static void mkdir_p(char *path) {
+
+	char *cmd = (char*) malloc(100*sizeof(char));
+	strcpy(cmd, "mkdir -p \"");
+	strcat(cmd, path);
+	strcat(cmd, "\"");
+
+        printf("mkdir_p: executing '%s'\n", cmd);
+
+        FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("mkdir_p: failed to run command\n" );
+                return;
+        }
+        
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("%s\n", temp);
+        }
+        
+        pclose(fp);
+}
+
+obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) {
+
+        DARRAY(obs_source_t*) sources;
+        size_t count;
+        size_t i;
+	bool enabled = get_opt_preprocess();
+
+        da_init(sources);
+
+        count = obs_data_array_count(array);
+        da_reserve(sources, count);
+
+        for (i = 0; i < count; i++) {
+                obs_data_t   *source_data = obs_data_array_item(array, i);
+		obs_data_t *settings = obs_data_get_obj(source_data, "settings");
+		if (settings != NULL && strcmp(obs_data_get_string(source_data, "id"),"ffmpeg_source") == 0) {
+
+			if (enabled) {
+
+				if (!obs_data_get_string(settings, "ffinput") || strcmp(obs_data_get_string(settings, "ffinput"), "") == 0) {
+					obs_data_set_string(settings, "ffinput", obs_data_get_string(settings, "input"));
+				}
+
+				char *fifo = (char*) malloc(100*sizeof(char));
+				strcpy(fifo, "/tmp/obs/");
+				strcat(fifo, scene_name);
+				strcat(fifo, "/");
+
+				mkdir_p(fifo);
+
+				strcat(fifo, obs_data_get_string(source_data, "name"));
+				mkfifo(fifo, 0666);
+
+				obs_data_set_string(settings, "ffoutput", fifo);
+				obs_data_set_string(settings, "input", fifo);
+				obs_data_set_string(settings, "scene_name", scene_name);
+			
+				printf("preprocess: %s -> %s\n", obs_data_get_string(settings, "ffinput"),  obs_data_get_string(settings, "input"));
+			} else {
+																			 
+				if (obs_data_get_string(settings, "ffinput") && strcmp(obs_data_get_string(settings, "ffinput"), "") != 0) {
+					printf("preprocess: reverting config\n");
+					obs_data_set_string(settings, "input", obs_data_get_string(settings, "ffinput"));
+				}
+                                
+
+			}
+		}
+
+        }
+
+	return array;
+
+}
+
 void OBSBasic::Load(const char *file)
 {
 	disableSaving++;
@@ -695,6 +781,9 @@ void OBSBasic::Load(const char *file)
 	obs_data_array_t *transitions= obs_data_get_array(data, "transitions");
 	const char       *sceneName = obs_data_get_string(data,
 			"current_scene");
+
+	sources = preprocess_sources(sources, (char *)sceneName);
+
 	const char       *programSceneName = obs_data_get_string(data,
 			"current_program_scene");
 	const char       *transitionName = obs_data_get_string(data,

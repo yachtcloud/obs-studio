@@ -14,12 +14,36 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <sys/types.h>
+#include <unistd.h>
+
+#include <stdio.h>
+#include <ctype.h>
 #include <obs-module.h>
 #include <util/platform.h>
 #include <util/dstr.h>
 
+#include <limits.h>
+#include <string.h>
+#include <stdlib.h>
+#include <unistd.h> 
+#include <signal.h>
+
+
 #include "obs-ffmpeg-compat.h"
 #include "obs-ffmpeg-formats.h"
+#include "obs-scene.h"
+#include "obs-ui.h"
+
+
+#include <stdlib.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
+#include <arpa/inet.h>
 
 #include <media-playback/media.h>
 
@@ -39,9 +63,19 @@ struct ffmpeg_source {
 	bool media_valid;
 	bool destroy_media;
 
+  // rescue
   double source_frames;
   unsigned long last_frame_at;
   bool restarted;
+
+  // preprocess
+  int restart_status;
+  pthread_t *tid;
+  char **rescale;
+  char **codecs;
+  char *scene_name;
+  char *ffinput;
+  char *ffoutput;
 
 	struct SwsContext *sws_ctx;
 	int sws_width;
@@ -266,7 +300,7 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 
 static bool rescue (void *data, bool debug)
 {
-	struct ffmpeg_source *c = data;
+  struct ffmpeg_source *c = data;
   double source_frames = obs_source_get_total_frames(c->source);
   double diff;
   time_t current_time = time(NULL);
@@ -279,9 +313,11 @@ static bool rescue (void *data, bool debug)
     diff = (double) source_frames - c->source_frames;
 
     if ( diff > 0 && c->last_frame_at != current_time ) {
-      
+      if (c->restarted == true)
+	    	printf("rescue: resuming to normal state after restart\n");
       c->last_frame_at = current_time;
       c->restarted = false;
+      c->restart_status = 0;
 
       if ( debug ) {
         time_info = localtime((time_t) &current_time);
@@ -323,15 +359,28 @@ static bool rescue (void *data, bool debug)
 
 }
 
+
+static void preprocess(struct ffmpeg_source **s_p);
+
 static void source_restart (void *data, bool debug)
 {
 
-	struct ffmpeg_source *c = data;
-  
-  if ( c->restarted == false ) {
+  struct ffmpeg_source *c = data;
+
+  bool opt_preprocess = get_opt_preprocess();
+
+  // at start and each 30 secs
+  if (opt_preprocess)
+    if (c->restart_status == 0 || (c->restart_status != 3 && c->restart_status%3 == 0)) {
+      preprocess(&c);
+    }
+
+  // 30 secs
+  if ( (!opt_preprocess && c->restart_status == 0) || (opt_preprocess && c->restart_status == 3 ) ) {
     if ( debug )
       printf("%s restarting...\n", obs_source_get_name(c->source));
     c->restarted = true;
+    c->restart_status++;
     
     obs_source_output_video(c->source, NULL);
     obs_source_update(c->source, NULL);
@@ -340,6 +389,8 @@ static void source_restart (void *data, bool debug)
   } else {
     if ( debug )
       printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
+    
+    c->restart_status++;
     return false;
   }
 }
@@ -420,7 +471,7 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 	s->seekable = obs_data_get_bool(settings, "seekable");
 
 	if (s->media_valid) {
-		mp_media_free(&s->media);
+		//mp_media_free(&s->media);
 		s->media_valid = false;
 	}
 
@@ -431,6 +482,9 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 	dump_source_info(s, input, input_format);
 	if (!s->restart_on_activate || active)
 		ffmpeg_source_start(s);
+
+
+
 }
 
 static const char *ffmpeg_source_getname(void *unused)
@@ -504,11 +558,270 @@ static void get_nb_frames(void *data, calldata_t *cd)
 	calldata_set_int(cd, "num_frames", frames);
 }
 
+static char *run_sync_forever(char *cmd) {
+	
+	printf("run sync forever: executing '%s'\n", cmd);
+
+	FILE *fp = popen(cmd, "r");
+	if (fp == NULL) {
+		printf("run sync forever: failed to run command\n" );
+		return NULL;
+	}
+
+	char path[1035];
+	while (fgets(path, sizeof(path)-1, fp) != NULL) {
+		printf("run sync forever: %s\n", path);
+	}
+
+	pclose(fp);
+	return NULL;
+}
+
+
+static char *run_sync(char *cmd) {
+
+	printf("run sync: executing '%s'\n", cmd);
+
+	FILE *fp = popen(cmd, "r");
+	if (fp == NULL) {
+		printf("run sync: failed to run command\n" );
+		return NULL;
+	}
+
+	int max = 1000;
+	char *out = (char*) malloc(max*sizeof(char));
+	strcpy(out, "");
+	
+	char path[1035];
+	int i = 0;
+	while (fgets(path, sizeof(path)-1, fp) != NULL) {
+		i += strlen(path);
+		if ((i+1) >= max) break;
+		strcat(out, (char *) path);
+	}
+
+	pclose(fp);
+	return out;
+}
+
+char * trim(char * s) {
+	char * p = s;
+	int l = strlen(p);
+
+	while(isspace(p[l - 1])) p[--l] = 0;
+	while(* p && isspace(* p)) ++p, --l;
+
+	memmove(s, p, l + 1);
+	return s;
+}   
+
+char** explode(char delimiter, char* str, int **size) {
+	int l = strlen(str), i=0, j=0, k=0;
+	char x = NULL;
+	char** r = (char**)realloc(r, sizeof(char**));
+	r[0] = (char*)malloc(l*sizeof(char));
+	while (i<l+1) {
+		x = str[i++];
+		if (x==delimiter || x=='\0') {
+			r[j][k] = '\0';
+			r[j] = (char*)realloc(r[j], k*sizeof(char));
+			k = 0;
+			r = (char**)realloc(r, (++j+1)*sizeof(char**));
+			r[j] = (char*)malloc(l*sizeof(char));
+		} else {
+			r[j][k++] = x;
+		}
+	}
+	*size = j;
+	return r;
+}
+
+static char ** probe(char *input) {
+	char *cmd = (char*) malloc(1000*sizeof(char));
+	char **codecs = (char **) malloc(5*sizeof(char *));
+	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1:nokey=1 ");
+	strcat(cmd, input);
+	strcat(cmd, " | head -3");
+
+	int *size = (int*) malloc(sizeof(int));
+	char **data = explode('\n', trim(run_sync(cmd)), &size);
+	if (size == 3) {
+		printf("probe: got codec %s, %sx%s\n", data[0], data[1], data[2]);
+	} else {
+		printf("probe: failed to probe '%s'\n", input);
+		return NULL;
+	}
+	return data;
+}
+
+char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_height) {
+
+	char *rescalecmd = malloc(500*sizeof(char));
+
+	char *rescalescript = get_opt_rescale_script();
+
+	if (rescalescript == NULL) {
+		rescalescript = malloc(15*sizeof(char));
+		strcpy(rescalescript, "rescale.py");
+	}
+
+	strcpy(rescalecmd, "python ");
+	strcat(rescalecmd, rescalescript);
+	strcat(rescalecmd, " ");
+	strcat(rescalecmd, scene_name);
+	strcat(rescalecmd, " \"");
+	strcat(rescalecmd, ffinput);
+	strcat(rescalecmd, "\"");
+
+	char *out = trim(run_sync(rescalecmd));
+
+	if (strcmp(out, "") == 0) {
+		printf("get rescale size: no output '%s'\n", rescalecmd);
+		return NULL;
+	}
+
+	int *size = (int*)malloc(sizeof(int));
+	char **resize_to = explode(':', out, &size);
+
+	if (size != 2) {
+		printf("get rescale size: incorrect format '%s'\n", out);
+		return NULL;
+	}
+
+	int r_width = atoi(resize_to[0]);
+	int r_height = atoi(resize_to[1]);
+
+	if (r_width > s_width) {
+		printf("get rescale size: upscaling detected, disabling rescaling\n");
+		return NULL;
+	}
+
+
+	if (s_width <= 0) {
+		printf("get rescale size: incorrect stream width '%d'\n", s_width);
+		return NULL;
+	}
+
+	// proportional resize
+	int p_width = r_width;
+	int p_height = (int) ((r_width*s_height)/s_width);
+
+	char** r = (char**)malloc(sizeof(char**));
+	r[0] = (char*)malloc(50*sizeof(char));
+	r[1] = (char*)malloc(50*sizeof(char));
+
+	sprintf(r[0], "%d", p_width);
+	sprintf(r[1], "%d", p_height);
+
+	printf("got rescale size: %sx%s\n", r[0], r[1]);
+
+	return r;
+}
+
+char **can_preprocess(struct ffmpeg_source *s) {
+	
+	char **codecs = probe(s->ffinput);
+
+	if (codecs == NULL) {
+		printf("preprocessing failed: codecs could not be retrieved\n");
+		return NULL;
+	}
+
+	if (strcmp(codecs[0],"h264") == 0 || strcmp(codecs[0],"mpeg2video") == 0) {
+		return codecs;
+	} else {
+		printf("preprocessing failed: codec %s not supported\n", codecs[0]);
+		return NULL;
+	}
+}
+	
+void *preprocess_thread(struct ffmpeg_source *s) {
+
+	s->codecs = can_preprocess(s);
+
+	if (s->codecs == NULL) {
+		printf("preprocess: cannot preprocess sending the input source as is to '%s'\n", s->ffoutput);
+
+		char *ffcmd = (char *) malloc(2000*sizeof(char));
+		strcpy(ffcmd, "ffmpeg -i \"");
+		strcat(ffcmd, s->ffinput);
+		strcat(ffcmd, "\" -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 > \"");
+		strcat(ffcmd, s->ffoutput);
+		strcat(ffcmd, "\"");		
+
+		run_sync_forever(ffcmd);
+
+	} else {
+		char *ffcmd = (char *) malloc(2000*sizeof(char));
+		strcpy(ffcmd, "ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		if (strcmp(s->codecs[0],"mpeg2video") == 0) {
+			strcat(ffcmd, "mpeg2_cuvid -surfaces 8 -drop_second_field 1 ");
+		}
+		
+		if (strcmp(s->codecs[0],"h264") == 0) {
+			strcat(ffcmd, "h264_cuvid");
+
+		}
+		strcat(ffcmd, " -deint 2 -i  \"");
+		strcat(ffcmd, s->ffinput);
+		strcat(ffcmd, "\" ");
+		
+		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[1]), atoi(s->codecs[2]));
+		if (s->rescale != NULL) {
+			strcat(ffcmd, " -vf scale_npp=");
+			strcat(ffcmd, s->rescale[0]);
+			strcat(ffcmd, ":");
+			strcat(ffcmd, s->rescale[1]);
+		} else {
+			printf("preprocess: no hw rescaling\n");
+		}
+
+		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames 'expr:gte(t,n_forced*2)' -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 -f mpegts pipe:1 > \"");
+		strcat(ffcmd, s->ffoutput);
+		strcat(ffcmd, "\"");		
+
+		run_sync_forever(ffcmd);
+	}
+}
+
+static void preprocess(struct ffmpeg_source **s_p) {
+
+	struct ffmpeg_source *s = *s_p;
+
+	if (s->tid != NULL) {
+		printf("preprocess: cancelling thread\n");
+		pthread_cancel(s->tid);
+	}
+
+	pthread_t tid;
+	int err = pthread_create(&tid, NULL, &preprocess_thread, s);
+
+        if (err != 0)
+            printf("preprocess: can't create thread :[%s]\n", strerror(err));
+        else {
+	    s->tid = tid;
+            printf("preprocess: thread created successfully\n");
+	}
+}
+
 static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 {
-	UNUSED_PARAMETER(settings);
 
+	UNUSED_PARAMETER(settings);
 	struct ffmpeg_source *s = bzalloc(sizeof(struct ffmpeg_source));
+
+	/**
+	 * preprocess: start
+	 */
+	bool opt_preprocess = get_opt_preprocess();
+	if (opt_preprocess) {
+		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
+		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
+		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
+		preprocess(&s);
+	}
+	// preprocess: end
+
 	s->source = source;
 
   s->source_frames = (double) 0;
@@ -524,8 +837,8 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 			get_duration, s);
 	proc_handler_add(ph, "void get_nb_frames(out int num_frames)",
 			get_nb_frames, s);
-
 	ffmpeg_source_update(s, settings);
+
 	return s;
 }
 

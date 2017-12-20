@@ -81,6 +81,15 @@ bool opt_cuda_decoding = false;
 bool get_opt_cuda_decoding () {
   return opt_cuda_decoding;
 }
+bool opt_preprocess = false;
+bool get_opt_preprocess () {
+	return opt_preprocess;
+}
+char *opt_rescale_script = NULL;
+char *get_opt_rescale_script () {
+  return opt_rescale_script;
+}
+
 char *opt_filter = NULL;
 char *get_opt_filter () {
   return opt_filter;
@@ -88,6 +97,14 @@ char *get_opt_filter () {
 string opt_starting_collection;
 string opt_starting_profile;
 string opt_starting_scene;
+char *get_opt_starting_scene () {
+	if (opt_starting_scene.empty()) return NULL;
+	char *cstr = new char[opt_starting_scene.length() + 1];
+	strcpy(cstr, opt_starting_scene.c_str());
+	return cstr;
+}
+
+
 uint64_t opt_websocket_port;
 
 
@@ -1903,6 +1920,12 @@ int main(int argc, char *argv[])
 		} else if (arg_is(argv[i], "--startreplaybuffer", nullptr)) {
 			opt_start_replaybuffer = true;
 
+		} else if (arg_is(argv[i], "--preprocess", nullptr)) {
+			opt_preprocess = true;
+
+		} else if (arg_is(argv[i], "--rescale-script", nullptr)) {
+			if (++i < argc) opt_rescale_script = (char *)argv[i];
+
 		} else if (arg_is(argv[i], "--filter", nullptr)) {
 			if (++i < argc) opt_filter = (char *)argv[i];
 
@@ -1951,7 +1974,9 @@ int main(int argc, char *argv[])
 			"--websocket-port <number>: Specify websocket port for obs-websockets.\n" <<
 			"--cuda-decoding: Enable cuda decoding.\n" <<
       "--filter <string>: Apply filter on input streams, e.g., 'hwupload_cuda,scale_npp=w=275:h=-1:format=yuv420p:interp_algo=lanczos,hwdownload,format=yuv420p' or 'rotate=-10*PI/180'\n" <<
-      "--disable-source-resizing: Disable resizing of source inputs.\n"
+      "--disable-source-resizing: Disable resizing of source inputs.\n"<<
+      "--preprocess: Enable cuda preprocessing of source inputs (supported input video codecs: h264, mpeg2video).\n"<<
+      "--rescale-script <string>: Specify the rescale script path, if cuda preprocessing is enabled (default 'rescale.py').\n"
 				<< "\n" <<
 			"--startstreaming: Automatically start streaming.\n" <<
 			"--startrecording: Automatically start recording.\n" <<

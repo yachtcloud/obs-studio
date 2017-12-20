@@ -123,6 +123,12 @@ EXPORT char *get_opt_filter();
 
 EXPORT bool get_opt_disable_source_resizing();
 
+EXPORT char *get_opt_starting_scene();
+
+EXPORT char *get_opt_rescale_script();
+
+EXPORT bool get_opt_preprocess();
+
 
 /* ------------------------------------------------------------------------- */
 
