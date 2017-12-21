@@ -769,7 +769,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
-		strcat(ffcmd, " -deint 2 -i  \"");
+		strcat(ffcmd, " -deint 2 -drop_second_field 1 -surfaces 10  -i  \"");
 		strcat(ffcmd, s->ffinput);
 		strcat(ffcmd, "\" ");
 		
