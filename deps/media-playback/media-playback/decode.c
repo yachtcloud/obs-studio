@@ -73,7 +73,19 @@ static int mp_open_codec(struct mp_decode *d)
 	    c->codec_id != AV_CODEC_ID_WEBP)
 		c->thread_count = 0;
 
-	ret = avcodec_open2(c, d->codec, NULL);
+
+	AVDictionary * av_dict_opts = NULL;
+
+
+	//av_dict_set( &av_dict_opts, "hwaccel_device", "0", 0);
+	//av_dict_set( &av_dict_opts, "hwaccel", "cuvid", 0);
+	//av_dict_set( &av_dict_opts, "gpu", "0", 0);
+	//av_dict_set( &av_dict_opts, "deint", "8", 0);
+	//av_dict_set( &av_dict_opts, "drop_second_field", "1", 0);
+	//av_dict_set( &av_dict_opts, "surfaces", "10", 0 );
+
+
+	ret = avcodec_open2(c, d->codec, &av_dict_opts);
 	if (ret < 0)
 		goto fail;
 
