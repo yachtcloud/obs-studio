@@ -775,10 +775,16 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		
 		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[1]), atoi(s->codecs[2]));
 		if (s->rescale != NULL) {
-			strcat(ffcmd, " -vf scale_npp=");
+			//strcat(ffcmd, " -vf scale_npp=");
+			//strcat(ffcmd, s->rescale[0]);
+			//strcat(ffcmd, ":");
+			//strcat(ffcmd, s->rescale[1]);
+			//hwupload_cuda,scale... interp_algo=lanczos
+			strcat(ffcmd, " -filter:v \"scale_npp=w=");
 			strcat(ffcmd, s->rescale[0]);
-			strcat(ffcmd, ":");
+			strcat(ffcmd, ":h=");
 			strcat(ffcmd, s->rescale[1]);
+			strcat(ffcmd, ":format=nv12:interp_algo=super,hwdownload,format=nv12\" ");
 		} else {
 			printf("preprocess: no hw rescaling\n");
 		}
