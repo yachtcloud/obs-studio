@@ -179,7 +179,11 @@ static bool open_video_codec(struct ffmpeg_data *data)
 		strlist_free(opts);
 	}
 
-	ret = avcodec_open2(context, data->vcodec, NULL);
+	AVDictionary * av_dict_opts = NULL;
+	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*2)", 0);
+	av_dict_set( &av_dict_opts, "g", "50", 0);
+
+	ret = avcodec_open2(context, data->vcodec, &av_dict_opts);
 	if (ret < 0) {
 		blog(LOG_WARNING, "Failed to open video codec: %s",
 				av_err2str(ret));

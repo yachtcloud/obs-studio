@@ -90,7 +90,11 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 {
 	int ret;
 
-	ret = avcodec_open2(enc->context, enc->nvenc, NULL);
+	AVDictionary * av_dict_opts = NULL;
+	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*2)", 0);
+	av_dict_set( &av_dict_opts, "g", "50", 0);
+
+	ret = avcodec_open2(enc->context, enc->nvenc, &av_dict_opts);
 	if (ret < 0) {
 		warn("Failed to open NVENC codec: %s", av_err2str(ret));
 		return false;
