@@ -91,8 +91,8 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 	int ret;
 
 	AVDictionary * av_dict_opts = NULL;
-	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*2)", 0);
-	av_dict_set( &av_dict_opts, "g", "50", 0);
+	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*1)", 0);
+	av_dict_set( &av_dict_opts, "g", "25", 0);
 
 	ret = avcodec_open2(enc->context, enc->nvenc, &av_dict_opts);
 	if (ret < 0) {
