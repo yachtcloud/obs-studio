@@ -762,7 +762,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		char *ffcmd = (char *) malloc(2000*sizeof(char));
 		strcpy(ffcmd, "ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[0],"mpeg2video") == 0) {
-			strcat(ffcmd, "mpeg2_cuvid -surfaces 8 -drop_second_field 1 ");
+			strcat(ffcmd, "mpeg2_cuvid");
 		}
 		
 		if (strcmp(s->codecs[0],"h264") == 0) {

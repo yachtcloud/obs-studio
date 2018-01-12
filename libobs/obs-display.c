@@ -108,7 +108,6 @@ void obs_display_destroy(obs_display_t *display)
 void obs_display_resize(obs_display_t *display, uint32_t cx, uint32_t cy)
 {
 	if (!display) return;
-
 	pthread_mutex_lock(&display->draw_info_mutex);
 
 	display->cx = cx;
