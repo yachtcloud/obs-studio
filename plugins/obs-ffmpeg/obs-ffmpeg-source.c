@@ -638,15 +638,15 @@ char** explode(char delimiter, char* str, int **size) {
 
 static char ** probe(char *input) {
 	char *cmd = (char*) malloc(1000*sizeof(char));
-	char **codecs = (char **) malloc(5*sizeof(char *));
-	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height -of default=noprint_wrappers=1:nokey=1 \"");
+	char **codecs = (char **) malloc(6*sizeof(char *));
+	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height,index -of default=noprint_wrappers=1:nokey=1 \"");
 	strcat(cmd, input);
-	strcat(cmd, "\" | head -3");
+	strcat(cmd, "\" | head -4");
 
 	int *size = (int*) malloc(sizeof(int));
 	char **data = explode('\n', trim(run_sync(cmd)), &size);
-	if (size == 3) {
-		printf("probe: got codec %s, %sx%s\n", data[0], data[1], data[2]);
+	if (size == 4) {
+		printf("probe: got codec %s, %sx%s, index %s\n", data[1], data[2], data[3], data[0]);
 	} else {
 		printf("probe: failed to probe '%s'\n", input);
 		return NULL;
@@ -727,18 +727,34 @@ char **can_preprocess(struct ffmpeg_source *s) {
 		return NULL;
 	}
 
-	if (strcmp(codecs[0],"h264") == 0 || strcmp(codecs[0],"mpeg2video") == 0) {
+	if (strcmp(codecs[1],"h264") == 0 || strcmp(codecs[1],"mpeg2video") == 0) {
 		return codecs;
 	} else {
-		printf("preprocessing failed: codec %s not supported\n", codecs[0]);
+		printf("preprocessing failed: codec %s not supported\n", codecs[1]);
 		return NULL;
 	}
 }
 	
+
+void sleep_ms(int milliseconds) {
+	struct timespec ts;
+	ts.tv_sec = milliseconds / 1000;	
+	ts.tv_nsec = (milliseconds % 1000) * 1000000;
+	nanosleep(&ts, NULL);
+}
+
+
 void *preprocess_thread(struct ffmpeg_source *s) {
 
 	if (!get_opt_copy())
-		s->codecs = can_preprocess(s);
+		while (s->codecs == NULL) {
+			printf("preprocessing: trying to probe...\n");
+			s->codecs = can_preprocess(s);
+
+			if (s->codecs != NULL) break;
+			printf("preprocessing: cannot get codecs retrying in two secs\n");
+			sleep_ms(2*1000);
+		}
 
 	if (s->codecs == NULL) {
 		printf("preprocess: cannot preprocess sending the input source as is to '%s'\n", s->ffoutput);
@@ -761,19 +777,19 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	} else {
 		char *ffcmd = (char *) malloc(2000*sizeof(char));
 		strcpy(ffcmd, "ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
-		if (strcmp(s->codecs[0],"mpeg2video") == 0) {
+		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
 		
-		if (strcmp(s->codecs[0],"h264") == 0) {
+		if (strcmp(s->codecs[1],"h264") == 0) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
-		strcat(ffcmd, " -deint 2 -drop_second_field 1 -surfaces 10  -i  \"");
+		strcat(ffcmd, "  -surfaces 10 -drop_second_field 1 -deint 2 -i  \"");
 		strcat(ffcmd, s->ffinput);
 		strcat(ffcmd, "\" ");
 		
-		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[1]), atoi(s->codecs[2]));
+		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
 			//strcat(ffcmd, " -vf scale_npp=");
 			//strcat(ffcmd, s->rescale[0]);
@@ -789,7 +805,11 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			printf("preprocess: no hw rescaling\n");
 		}
 
-		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames 'expr:gte(t,n_forced*2)' -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 -f mpegts pipe:1 > \"");
+		// omit audio select first video stream
+		strcat(ffcmd, "-map 0:");
+		strcat(ffcmd, s->codecs[0]);
+		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames 'expr:gte(t,n_forced*2)' -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, " -f mpegts pipe:1 > \"");
 		strcat(ffcmd, s->ffoutput);
 		strcat(ffcmd, "\"");		
 
