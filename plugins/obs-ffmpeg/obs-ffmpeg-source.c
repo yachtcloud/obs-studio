@@ -76,6 +76,7 @@ struct ffmpeg_source {
   char *scene_name;
   char *ffinput;
   char *ffoutput;
+  int i;
 
 	struct SwsContext *sws_ctx;
 	int sws_width;
@@ -98,6 +99,17 @@ struct ffmpeg_source {
 	bool close_when_inactive;
 	bool seekable;
 };
+
+
+void sleep_ms(int milliseconds) {
+	struct timespec ts;
+	ts.tv_sec = milliseconds / 1000;	
+	ts.tv_nsec = (milliseconds % 1000) * 1000000;
+	nanosleep(&ts, NULL);
+}
+
+
+
 
 static bool is_local_file_modified(obs_properties_t *props,
 		obs_property_t *prop, obs_data_t *settings)
@@ -736,15 +748,10 @@ char **can_preprocess(struct ffmpeg_source *s) {
 }
 	
 
-void sleep_ms(int milliseconds) {
-	struct timespec ts;
-	ts.tv_sec = milliseconds / 1000;	
-	ts.tv_nsec = (milliseconds % 1000) * 1000000;
-	nanosleep(&ts, NULL);
-}
-
-
 void *preprocess_thread(struct ffmpeg_source *s) {
+
+	printf("preprocessing: sleeping to start stream %d secs...\n", s->i);
+	sleep_ms(s->i * 1000);
 
 	if (!get_opt_copy())
 		while (s->codecs == NULL) {
@@ -848,6 +855,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 	 */
 	bool opt_preprocess = get_opt_preprocess();
 	if (opt_preprocess) {
+		s->i = (int) obs_data_get_int(settings, "i");
 		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
 		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
 		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");

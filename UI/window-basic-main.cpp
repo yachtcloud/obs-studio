@@ -17,6 +17,8 @@
     along with this program.  If not, see <http://www.gnu.org/licenses/>.
 ******************************************************************************/
 
+#include <stdio.h>
+#include <stdlib.h>
 #include <time.h>
 #include <obs.hpp>
 #include <QGuiApplication>
@@ -705,6 +707,8 @@ static void mkdir_p(char *path) {
         pclose(fp);
 }
 
+int num_streams = 0;
+
 obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) {
 
         DARRAY(obs_source_t*) sources;
@@ -742,6 +746,11 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 				obs_data_set_string(settings, "input", fifo);
 				obs_data_set_string(settings, "scene_name", scene_name);
 			
+				num_streams++;
+				printf("setting %d\n", num_streams);
+				obs_data_set_int(settings, "i", num_streams);
+	
+
 				printf("preprocess: %s -> %s\n", obs_data_get_string(settings, "ffinput"),  obs_data_get_string(settings, "input"));
 			} else {
 																			 
