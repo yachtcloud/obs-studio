@@ -71,6 +71,8 @@ struct ffmpeg_source {
   // preprocess
   int restart_status;
   pthread_t *tid;
+  pid_t pid;
+ FILE *fp;
   char **rescale;
   char **codecs;
   char *scene_name;
@@ -575,6 +577,8 @@ static char *run_sync_forever(char *cmd) {
 	printf("run sync forever: executing '%s'\n", cmd);
 
 	FILE *fp = popen(cmd, "r");
+	return fp;
+
 	if (fp == NULL) {
 		printf("run sync forever: failed to run command\n" );
 		return NULL;
@@ -752,8 +756,8 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
-	printf("preprocessing: sleeping to start stream %d secs...\n", s->i);
-	sleep_ms(s->i * 1000);
+	//printf("preprocessing: sleeping to start stream %d secs...\n", s->i);
+	//sleep_ms(s->i * 1000);
 
 	if (!get_opt_copy())
 		while (s->codecs == NULL) {
@@ -794,7 +798,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
-		strcat(ffcmd, "  -surfaces 10 -drop_second_field 1 -deint 2 -i  \"");
+		strcat(ffcmd, "  -surfaces 8 -drop_second_field 1 -deint 2 -i  \"");
 		strcat(ffcmd, s->ffinput);
 		strcat(ffcmd, "\" ");
 		
@@ -823,21 +827,34 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		strcat(ffcmd, "\"");		
 
 	}
-	strcat(ffcmd, " 2>/dev/null ");
+	strcat(ffcmd, " 2>/dev/null");
 
-	while (1) {
-		printf("preprocess: executing ffcmd...\n");
-		run_sync_forever(ffcmd);
-		printf("preprocess: ffcmd failed? sleeping 2 secs and executing again\n");
-		sleep_ms(2*1000);
-	}
+	//while (1) {
+	//	printf("preprocess: executing ffcmd...\n");
+	FILE *fp =	run_sync_forever(ffcmd);
+	s->fp = fp;
+	s->pid = NULL;// fp->pipe_pid;
+	//	printf("preprocess: ffcmd failed? sleeping 2 secs and executing again\n");
+	//	sleep_ms(2*1000);
+	//}
 }
 
 static void preprocess(struct ffmpeg_source **s_p) {
 
 	struct ffmpeg_source *s = *s_p;
 
+		if (s->fp) {
+			printf("FP close\n");
+			fclose(s->fp);
+		}
+		if (s->pid) {
+			printf("pid kill\n");
+			kill(s->pid, SIGKILL);
+		}
+
+
 	if (s->tid != NULL) {
+
 		printf("preprocess: cancelling thread\n");
 		int res = pthread_cancel(s->tid);
 		if (res != 0) {
@@ -851,7 +868,7 @@ static void preprocess(struct ffmpeg_source **s_p) {
 		       printf("preprocess: thread was canceled\n");
 		else
 		       printf("preprocess: thread wasn't canceled (shouldn't happen!)\n");
-
+				
 	}
 
 	pthread_t tid;

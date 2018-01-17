@@ -684,6 +684,29 @@ void OBSBasic::LogScenes()
 
 
 
+static void syncfs() {
+
+	char *cmd = (char*) malloc(100*sizeof(char));
+	strcpy(cmd, "sync");
+
+        printf("sync: executing '%s'\n", cmd);
+
+        FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("sync: failed to run command\n" );
+                return;
+        }
+        
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("%s\n", temp);
+        }
+        
+        pclose(fp);
+}
+
+
+
 static void mkdir_p(char *path) {
 
 	char *cmd = (char*) malloc(100*sizeof(char));
@@ -764,6 +787,8 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 		}
 
         }
+
+	syncfs();
 
 	return array;
 
