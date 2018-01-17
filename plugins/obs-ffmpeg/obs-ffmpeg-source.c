@@ -653,7 +653,7 @@ static char ** probe(char *input) {
 	char **codecs = (char **) malloc(6*sizeof(char *));
 	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height,index -of default=noprint_wrappers=1:nokey=1 \"");
 	strcat(cmd, input);
-	strcat(cmd, "\" | head -4");
+	strcat(cmd, "\" | head -4 2>/dev/null");
 
 	int *size = (int*) malloc(sizeof(int));
 	char **data = explode('\n', trim(run_sync(cmd)), &size);
@@ -750,6 +750,8 @@ char **can_preprocess(struct ffmpeg_source *s) {
 
 void *preprocess_thread(struct ffmpeg_source *s) {
 
+	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
+
 	printf("preprocessing: sleeping to start stream %d secs...\n", s->i);
 	sleep_ms(s->i * 1000);
 
@@ -770,19 +772,19 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		printf("preprocess: sending the input source as is to '%s'\n", s->ffoutput);
 	}
 
+	char *ffcmd = (char *) malloc(2000*sizeof(char));
+
+	strcpy(ffcmd, "");
 	if (get_opt_copy() || s->codecs == NULL) {
 
-		char *ffcmd = (char *) malloc(2000*sizeof(char));
 		strcpy(ffcmd, "ffmpeg -i \"");
 		strcat(ffcmd, s->ffinput);
 		strcat(ffcmd, "\" -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 > \"");
 		strcat(ffcmd, s->ffoutput);
 		strcat(ffcmd, "\"");		
 
-		run_sync_forever(ffcmd);
 
 	} else {
-		char *ffcmd = (char *) malloc(2000*sizeof(char));
 		strcpy(ffcmd, "ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
@@ -820,7 +822,14 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		strcat(ffcmd, s->ffoutput);
 		strcat(ffcmd, "\"");		
 
+	}
+	strcat(ffcmd, " 2>/dev/null ");
+
+	while (1) {
+		printf("preprocess: executing ffcmd...\n");
 		run_sync_forever(ffcmd);
+		printf("preprocess: ffcmd failed? sleeping 2 secs and executing again\n");
+		sleep_ms(2*1000);
 	}
 }
 
@@ -830,7 +839,19 @@ static void preprocess(struct ffmpeg_source **s_p) {
 
 	if (s->tid != NULL) {
 		printf("preprocess: cancelling thread\n");
-		pthread_cancel(s->tid);
+		int res = pthread_cancel(s->tid);
+		if (res != 0) {
+			printf("preprocess: failed to cancel the thread!!!\n");
+		}
+		//wait till it is cancelled
+		void *r;
+		pthread_join(s->tid, &r);
+		
+		if (r == PTHREAD_CANCELED)
+		       printf("preprocess: thread was canceled\n");
+		else
+		       printf("preprocess: thread wasn't canceled (shouldn't happen!)\n");
+
 	}
 
 	pthread_t tid;
