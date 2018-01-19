@@ -755,9 +755,12 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 					obs_data_set_string(settings, "ffinput", obs_data_get_string(settings, "input"));
 				}
 
+				char *scn = (char *)malloc(sizeof(char)*(strlen(scene_name)+1));
+				strcpy(scn, scene_name);
+
 				char *fifo = (char*) malloc(100*sizeof(char));
 				strcpy(fifo, "/tmp/obs/");
-				strcat(fifo, scene_name);
+				strcat(fifo, scn);
 				strcat(fifo, "/");
 
 				mkdir_p(fifo);

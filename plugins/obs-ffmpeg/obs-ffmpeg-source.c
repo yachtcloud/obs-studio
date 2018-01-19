@@ -45,6 +45,9 @@
 #include <netinet/in.h>
 #include <arpa/inet.h>
 
+#include <sys/wait.h>
+
+
 #include <media-playback/media.h>
 
 #define FF_LOG(level, format, ...) \
@@ -331,7 +334,8 @@ static bool rescue (void *data, bool debug)
 	    	printf("rescue: resuming to normal state after restart\n");
       c->last_frame_at = current_time;
       c->restarted = false;
-      c->restart_status = 0;
+      c->restart_status = -2;
+
 
       if ( debug ) {
         time_info = localtime((time_t) &current_time);
@@ -379,14 +383,17 @@ static void preprocess(struct ffmpeg_source **s_p);
 static void source_restart (void *data, bool debug)
 {
 
+	printf("SOURCE RESTART!!!\n");
   struct ffmpeg_source *c = data;
+
+    c->restart_status++;
 
   bool opt_preprocess = get_opt_preprocess();
 
   // at start and each 30 secs
   if (opt_preprocess)
     if (c->restart_status == 0 || (c->restart_status != 3 && c->restart_status%3 == 0)) {
-      preprocess(&c);
+	    preprocess(&c);
     }
 
   // 30 secs
@@ -394,7 +401,6 @@ static void source_restart (void *data, bool debug)
     if ( debug )
       printf("%s restarting...\n", obs_source_get_name(c->source));
     c->restarted = true;
-    c->restart_status++;
     
     obs_source_output_video(c->source, NULL);
     obs_source_update(c->source, NULL);
@@ -404,7 +410,6 @@ static void source_restart (void *data, bool debug)
     if ( debug )
       printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
     
-    c->restart_status++;
     return false;
   }
 }
@@ -572,12 +577,162 @@ static void get_nb_frames(void *data, calldata_t *cd)
 	calldata_set_int(cd, "num_frames", frames);
 }
 
+int split (const char *str, char c, char ***arr)
+{
+    int count = 1;
+    int token_len = 1;
+    int i = 0;
+    char *p;
+    char *t;
+
+    p = str;
+    while (*p != '\0')
+    {
+        if (*p == c)
+            count++;
+        p++;
+    }
+
+    *arr = (char**) malloc(sizeof(char*) * count);
+    if (*arr == NULL)
+        exit(1);
+
+    p = str;
+    while (*p != '\0')
+    {
+        if (*p == c)
+        {
+            (*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+            if ((*arr)[i] == NULL)
+                exit(1);
+
+            token_len = 0;
+            i++;
+        }
+        p++;
+        token_len++;
+    }
+    (*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+    if ((*arr)[i] == NULL)
+        exit(1);
+
+    i = 0;
+    p = str;
+    t = ((*arr)[i]);
+    while (*p != '\0')
+    {
+        if (*p != c && *p != '\0')
+        {
+            *t = *p;
+            t++;
+        }
+        else
+        {
+            *t = '\0';
+            i++;
+            t = ((*arr)[i]);
+        }
+        p++;
+    }
+
+    return count;
+}
+
+
+char** explode(char delimiter, char* str, int **size) {
+	int l = strlen(str), i=0, j=0, k=0;
+	char x = NULL;
+	char** r = (char**)realloc(r, sizeof(char**));
+	r[0] = (char*)malloc(l*sizeof(char));
+	while (i<l+1) {
+		x = str[i++];
+		if (x==delimiter || x=='\0') {
+			r[j][k] = '\0';
+			r[j] = (char*)realloc(r[j], k*sizeof(char));
+			k = 0;
+			r = (char**)realloc(r, (++j+1)*sizeof(char**));
+
+			r[j] = (char*)malloc(l*sizeof(char));
+		} else {
+			r[j][k++] = x;
+		}
+	}
+	*size = j;
+	return r;
+}
+
+
+
+#define READ 0
+#define WRITE 1
+
+pid_t
+popen2(const char *command, int *infp, int *outfp, char *fifo)
+{
+    int p_stdin[2], p_stdout[2], p_stderr[2];
+    pid_t pid;
+
+    if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0  || pipe(p_stderr) != 0)
+        return -1;
+
+
+    printf("forking %s\n", fifo);
+
+    pid = fork();
+
+    if (pid < 0)
+        return pid;
+    else if (pid == 0)
+    {
+
+    int fd = open(fifo, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+
+    dup2(fd, 1);   // make stdout go to file
+    dup2(fd, 2);   // make stderr go to file - you may choose to not do this
+                   // or perhaps send stderr to another file
+
+    close(fd);     // fd no longer needed - the dup'ed handles are sufficient
+
+	char **brk = NULL;
+	int size = split(command, ' ', &brk);
+
+	brk[size] = (char *) NULL;
+
+        //can change to any exec* function family.
+        //execl(brk, NULL);
+	execv("/usr/local/bin/ffmpeg", brk);
+        perror("execl");
+        exit(1);
+    }
+        
+    // close unused descriptors on parent process.
+    close(p_stdin[READ]);
+    close(p_stdout[WRITE]);
+
+    if (infp == NULL)
+        close(p_stdin[WRITE]);
+    else
+        *infp = p_stdin[WRITE];
+
+    if (outfp == NULL)
+        close(p_stdout[READ]);
+    else
+        *outfp = p_stdout[READ];
+
+    return pid;
+}
+
+static pid_t run_sync_forever2(char *cmd, char *fifo) {
+	return popen2(cmd, malloc(sizeof(int)), malloc(sizeof(int)), fifo);
+}
+
 static char *run_sync_forever(char *cmd) {
 	
 	printf("run sync forever: executing '%s'\n", cmd);
 
+
+
 	FILE *fp = popen(cmd, "r");
-	return fp;
 
 	if (fp == NULL) {
 		printf("run sync forever: failed to run command\n" );
@@ -630,27 +785,6 @@ char * trim(char * s) {
 	memmove(s, p, l + 1);
 	return s;
 }   
-
-char** explode(char delimiter, char* str, int **size) {
-	int l = strlen(str), i=0, j=0, k=0;
-	char x = NULL;
-	char** r = (char**)realloc(r, sizeof(char**));
-	r[0] = (char*)malloc(l*sizeof(char));
-	while (i<l+1) {
-		x = str[i++];
-		if (x==delimiter || x=='\0') {
-			r[j][k] = '\0';
-			r[j] = (char*)realloc(r[j], k*sizeof(char));
-			k = 0;
-			r = (char**)realloc(r, (++j+1)*sizeof(char**));
-			r[j] = (char*)malloc(l*sizeof(char));
-		} else {
-			r[j][k++] = x;
-		}
-	}
-	*size = j;
-	return r;
-}
 
 static char ** probe(char *input) {
 	char *cmd = (char*) malloc(1000*sizeof(char));
@@ -781,15 +915,15 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	strcpy(ffcmd, "");
 	if (get_opt_copy() || s->codecs == NULL) {
 
-		strcpy(ffcmd, "ffmpeg -i \"");
+		strcpy(ffcmd, "-i ");
 		strcat(ffcmd, s->ffinput);
-		strcat(ffcmd, "\" -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 > \"");
-		strcat(ffcmd, s->ffoutput);
-		strcat(ffcmd, "\"");		
+		strcat(ffcmd, " -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 ");//> \"");
+		//strcat(ffcmd, s->ffoutput);
+		//strcat(ffcmd, "\"");		
 
 
 	} else {
-		strcpy(ffcmd, "ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
@@ -798,22 +932,22 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
-		strcat(ffcmd, "  -surfaces 8 -drop_second_field 1 -deint 2 -i  \"");
+		strcat(ffcmd, " -surfaces 8 -drop_second_field 1 -deint 2 -i ");
 		strcat(ffcmd, s->ffinput);
-		strcat(ffcmd, "\" ");
+		strcat(ffcmd, " ");
 		
 		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
-			//strcat(ffcmd, " -vf scale_npp=");
+			//strcat(ffcmd, "-vf scale_npp=");
 			//strcat(ffcmd, s->rescale[0]);
 			//strcat(ffcmd, ":");
 			//strcat(ffcmd, s->rescale[1]);
 			//hwupload_cuda,scale... interp_algo=lanczos
-			strcat(ffcmd, " -filter:v \"scale_npp=w=");
+			strcat(ffcmd, "-filter:v scale_npp=w=");
 			strcat(ffcmd, s->rescale[0]);
 			strcat(ffcmd, ":h=");
 			strcat(ffcmd, s->rescale[1]);
-			strcat(ffcmd, ":format=nv12:interp_algo=super,hwdownload,format=nv12\" ");
+			strcat(ffcmd, ":format=nv12:interp_algo=super,hwdownload,format=nv12 ");
 		} else {
 			printf("preprocess: no hw rescaling\n");
 		}
@@ -821,19 +955,18 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		// omit audio select first video stream
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames 'expr:gte(t,n_forced*2)' -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
-		strcat(ffcmd, " -f mpegts pipe:1 > \"");
-		strcat(ffcmd, s->ffoutput);
-		strcat(ffcmd, "\"");		
+		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames expr:gte(t,n_forced*2) -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, "-f mpegts pipe:1");// > ");
+		//strcat(ffcmd, s->ffoutput);
+		//strcat(ffcmd, " ");		
 
 	}
-	strcat(ffcmd, " 2>/dev/null");
+	//strcat(ffcmd, " 2> /dev/null");
 
 	//while (1) {
-	//	printf("preprocess: executing ffcmd...\n");
-	FILE *fp =	run_sync_forever(ffcmd);
-	s->fp = fp;
-	s->pid = NULL;// fp->pipe_pid;
+		printf("preprocess: executing ffcmd...\n");
+	s->pid = 	run_sync_forever2(ffcmd, s->ffoutput);
+	s->fp = NULL;// fp->pipe_pid;
 	//	printf("preprocess: ffcmd failed? sleeping 2 secs and executing again\n");
 	//	sleep_ms(2*1000);
 	//}
@@ -848,8 +981,16 @@ static void preprocess(struct ffmpeg_source **s_p) {
 			fclose(s->fp);
 		}
 		if (s->pid) {
-			printf("pid kill\n");
+			printf("preprocess: PID kill %ld!\n", s->pid);
 			kill(s->pid, SIGKILL);
+
+	                if (waitpid(s->pid, NULL, 0) < 0) {
+				printf("Failed to collect child process\n");
+			}
+
+			printf("preprocess: waiting for process to end...\n");
+			sleep_ms(3*1000);
+
 		}
 
 
@@ -871,14 +1012,15 @@ static void preprocess(struct ffmpeg_source **s_p) {
 				
 	}
 
+
 	pthread_t tid;
 	int err = pthread_create(&tid, NULL, &preprocess_thread, s);
 
-        if (err != 0)
-            printf("preprocess: can't create thread :[%s]\n", strerror(err));
-        else {
+	if (err != 0)
+	    printf("preprocess: can't create thread :[%s]\n", strerror(err));
+	else {
 	    s->tid = tid;
-            printf("preprocess: thread created successfully\n");
+	    printf("preprocess: thread created successfully\n");
 	}
 }
 
