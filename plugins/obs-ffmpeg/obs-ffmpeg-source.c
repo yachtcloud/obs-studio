@@ -334,7 +334,7 @@ static bool rescue (void *data, bool debug)
 	    	printf("rescue: resuming to normal state after restart\n");
       c->last_frame_at = current_time;
       c->restarted = false;
-      c->restart_status = -2;
+      c->restart_status = -1;
 
 
       if ( debug ) {
@@ -383,21 +383,29 @@ static void preprocess(struct ffmpeg_source **s_p);
 static void source_restart (void *data, bool debug)
 {
 
-	printf("SOURCE RESTART!!!\n");
   struct ffmpeg_source *c = data;
-
-    c->restart_status++;
-
+  c->restart_status++;
+  
   bool opt_preprocess = get_opt_preprocess();
+  // at start and each 60 secs
+  if (opt_preprocess) {
+    if (c->restart_status == 0 || c->restart_status%10 == 0) {
+    if ( debug )
+      printf("%s restarting...\n", obs_source_get_name(c->source));
 
-  // at start and each 30 secs
-  if (opt_preprocess)
-    if (c->restart_status == 0 || (c->restart_status != 3 && c->restart_status%3 == 0)) {
+	    c->restarted = true;
 	    preprocess(&c);
+	    return true;
+    } else {
+    	if ( debug )
+      		printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
+ 
+	return false;
     }
+  }
 
   // 30 secs
-  if ( (!opt_preprocess && c->restart_status == 0) || (opt_preprocess && c->restart_status == 3 ) ) {
+  if ( (!opt_preprocess && c->restart_status == 0) ) {
     if ( debug )
       printf("%s restarting...\n", obs_source_get_name(c->source));
     c->restarted = true;
@@ -868,9 +876,9 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 	return r;
 }
 
-char **can_preprocess(struct ffmpeg_source *s) {
+char **can_preprocess(char *input) {
 	
-	char **codecs = probe(s->ffinput);
+	char **codecs = probe(input);
 
 	if (codecs == NULL) {
 		printf("preprocessing failed: codecs could not be retrieved\n");
@@ -886,22 +894,68 @@ char **can_preprocess(struct ffmpeg_source *s) {
 }
 	
 
+static void preprocess_exec(char *cmd) {
+
+        printf("preprocess_exec: '%s'\n", cmd);
+
+        FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("sync: failed to run command\n" );
+                return;
+        }
+
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("%s\n", temp);
+        }
+
+        pclose(fp);
+}
+
+
+
+static void recreateFIFOAndsyncFS(char *fifo) {
+
+        char *cmdrm = (char*) malloc(100*sizeof(char));
+        strcpy(cmdrm, "rm -f ");
+	strcat(cmdrm, fifo);
+	preprocess_exec(cmdrm);
+
+
+        char *cmdmk = (char*) malloc(100*sizeof(char));
+        strcpy(cmdmk, "mkfifo ");
+	strcat(cmdmk, fifo);
+	preprocess_exec(cmdmk);
+
+	// alternative
+	//mkfifo(fifo, 0666);
+
+        char *cmdsync = (char*) malloc(100*sizeof(char));
+        strcpy(cmdsync, "sync");
+	preprocess_exec(cmdsync);
+
+	free(cmdrm);
+	free(cmdmk);
+	free(cmdsync);
+
+}
+
+
+
 void *preprocess_thread(struct ffmpeg_source *s) {
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
-	//printf("preprocessing: sleeping to start stream %d secs...\n", s->i);
-	//sleep_ms(s->i * 1000);
-
-	if (!get_opt_copy())
+	if (!get_opt_copy()) {
 		while (s->codecs == NULL) {
 			printf("preprocessing: trying to probe...\n");
-			s->codecs = can_preprocess(s);
+			s->codecs = can_preprocess(s->ffinput);
 
 			if (s->codecs != NULL) break;
 			printf("preprocessing: cannot get codecs retrying in two secs\n");
 			sleep_ms(2*1000);
 		}
+	}
 
 	if (s->codecs == NULL) {
 		printf("preprocess: cannot preprocess sending the input source as is to '%s'\n", s->ffoutput);
@@ -918,8 +972,6 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		strcpy(ffcmd, "-i ");
 		strcat(ffcmd, s->ffinput);
 		strcat(ffcmd, " -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 ");//> \"");
-		//strcat(ffcmd, s->ffoutput);
-		//strcat(ffcmd, "\"");		
 
 
 	} else {
@@ -938,11 +990,6 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		
 		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
-			//strcat(ffcmd, "-vf scale_npp=");
-			//strcat(ffcmd, s->rescale[0]);
-			//strcat(ffcmd, ":");
-			//strcat(ffcmd, s->rescale[1]);
-			//hwupload_cuda,scale... interp_algo=lanczos
 			strcat(ffcmd, "-filter:v scale_npp=w=");
 			strcat(ffcmd, s->rescale[0]);
 			strcat(ffcmd, ":h=");
@@ -956,51 +1003,70 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
 		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames expr:gte(t,n_forced*2) -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
-		strcat(ffcmd, "-f mpegts pipe:1");// > ");
-		//strcat(ffcmd, s->ffoutput);
-		//strcat(ffcmd, " ");		
+		strcat(ffcmd, "-f mpegts pipe:1");
 
 	}
-	//strcat(ffcmd, " 2> /dev/null");
 
-	//while (1) {
-		printf("preprocess: executing ffcmd...\n");
-	s->pid = 	run_sync_forever2(ffcmd, s->ffoutput);
+
+	recreateFIFOAndsyncFS(s->ffoutput);
+
+	printf("preprocess: executing \"%s\"...\n", ffcmd);
+	s->pid = run_sync_forever2(ffcmd, s->ffoutput);
 	s->fp = NULL;// fp->pipe_pid;
-	//	printf("preprocess: ffcmd failed? sleeping 2 secs and executing again\n");
-	//	sleep_ms(2*1000);
-	//}
+
+	sleep_ms(5*1000);
+
+        char **ffcodecs = NULL;	
+	int retries = 0;
+	while (ffcodecs == NULL) {
+		if (retries >=3) {
+			
+			printf("preprocessing: %s is not alive, giving up...\n", s->ffoutput);
+			return;
+		}
+			printf("preprocessing: is %s alive? retry no. %d\n", s->ffoutput, retries);
+			ffcodecs = can_preprocess(s->ffoutput);
+
+			if (ffcodecs != NULL) break;
+			sleep_ms(2*1000);
+			retries++;
+		}
+
+
+	printf("%s alive! restarting...\n", s->ffoutput);
+
+    	obs_source_output_video(s->source, NULL);
+   	obs_source_update(s->source, NULL);
+
+
 }
 
 static void preprocess(struct ffmpeg_source **s_p) {
 
 	struct ffmpeg_source *s = *s_p;
 
-		if (s->fp) {
-			printf("FP close\n");
-			fclose(s->fp);
+	if (s->fp) {
+		printf("FP close\n");
+		fclose(s->fp);
+	}
+	if (s->pid) {
+		printf("preprocess: PID kill %ld!\n", s->pid);
+		kill(s->pid, SIGKILL);
+
+		if (waitpid(s->pid, NULL, 0) < 0) {
+			printf("Failed to collect child process\n");
 		}
-		if (s->pid) {
-			printf("preprocess: PID kill %ld!\n", s->pid);
-			kill(s->pid, SIGKILL);
 
-	                if (waitpid(s->pid, NULL, 0) < 0) {
-				printf("Failed to collect child process\n");
-			}
-
-			printf("preprocess: waiting for process to end...\n");
-			sleep_ms(3*1000);
-
-		}
+		printf("preprocess: waiting 3 secs for process to end...\n");
+		sleep_ms(3*1000);
+	}
 
 
 	if (s->tid != NULL) {
 
 		printf("preprocess: cancelling thread\n");
-		int res = pthread_cancel(s->tid);
-		if (res != 0) {
-			printf("preprocess: failed to cancel the thread!!!\n");
-		}
+		pthread_cancel(s->tid);
+
 		//wait till it is cancelled
 		void *r;
 		pthread_join(s->tid, &r);
@@ -1008,7 +1074,7 @@ static void preprocess(struct ffmpeg_source **s_p) {
 		if (r == PTHREAD_CANCELED)
 		       printf("preprocess: thread was canceled\n");
 		else
-		       printf("preprocess: thread wasn't canceled (shouldn't happen!)\n");
+		       printf("preprocess: thread wasn't canceled\n");
 				
 	}
 
@@ -1039,6 +1105,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
 		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
 		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
+	
 		preprocess(&s);
 	}
 	// preprocess: end
