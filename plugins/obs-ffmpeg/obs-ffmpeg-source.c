@@ -794,16 +794,108 @@ char * trim(char * s) {
 	return s;
 }   
 
-static char ** probe(char *input) {
+void str_replace(char *target, const char *needle, const char *replacement)
+{
+    char buffer[1024] = { 0 };
+    char *insert_point = &buffer[0];
+    const char *tmp = target;
+    size_t needle_len = strlen(needle);
+    size_t repl_len = strlen(replacement);
+
+    while (1) {
+        const char *p = strstr(tmp, needle);
+
+        // walked past last occurrence of needle; copy remaining part
+        if (p == NULL) {
+            strcpy(insert_point, tmp);
+            break;
+        }
+
+        // copy part before needle
+        memcpy(insert_point, tmp, p - tmp);
+        insert_point += p - tmp;
+
+        // copy replacement string
+        memcpy(insert_point, replacement, repl_len);
+        insert_point += repl_len;
+
+        // adjust pointers, move on
+        tmp = p + needle_len;
+    }
+
+    // write altered string back to target
+    strcpy(target, buffer);
+}
+
+int file_exists (char *filename)
+{
+  struct stat   buffer;   
+  return (stat (filename, &buffer) == 0);
+}
+
+
+static char ** probe(char *input, int reprobe) {
+
+	char *cmdres;
+	char *input_hash = (char *) malloc(1000*sizeof(char));
+	strcpy(input_hash, input);
+
+	str_replace(input_hash, "/", "-");
+	str_replace(input_hash, "?", "-");
+	str_replace(input_hash, "=", "-");
+	str_replace(input_hash, ":", "-");
+	str_replace(input_hash, "&", "-");
+	str_replace(input_hash, " ", "-");
+
+	char *cache_path = (char *) malloc(1000*sizeof(char));
+	strcpy(cache_path, "/tmp/obs/");
+	strcat(cache_path, input_hash);
+
+
+	char *cache_data = (char *) malloc(1000*sizeof(char));
+
+	if( file_exists( cache_path ) ) {
+		// if exists
+
+		printf("cache found! %s\n", cache_path);
+
+		FILE *file;
+		file = fopen(cache_path, "r");
+		if (file) {
+	    	    fread (cache_data, 1, 1000, file);
+		    fclose(file);
+		}
+		cmdres = cache_data;
+	} else {
+
+		cache_data = NULL;
+	} 
+
+
+
 	char *cmd = (char*) malloc(1000*sizeof(char));
 	char **codecs = (char **) malloc(6*sizeof(char *));
 	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height,index -of default=noprint_wrappers=1:nokey=1 \"");
 	strcat(cmd, input);
 	strcat(cmd, "\" | head -4 2>/dev/null");
 
+	
+	if (reprobe == 1 || cache_data == NULL) {
+		cmdres = trim(run_sync(cmd));
+	}
+
 	int *size = (int*) malloc(sizeof(int));
-	char **data = explode('\n', trim(run_sync(cmd)), &size);
+	char **data = explode('\n', cmdres, &size);
 	if (size == 4) {
+
+		    FILE *fp = fopen(cache_path, "w");
+		    if (fp != NULL)
+		    {
+			
+			fprintf(fp, "%s", cmdres);
+			fclose(fp);
+		    }
+
 		printf("probe: got codec %s, %sx%s, index %s\n", data[1], data[2], data[3], data[0]);
 	} else {
 		printf("probe: failed to probe '%s'\n", input);
@@ -876,9 +968,9 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 	return r;
 }
 
-char **can_preprocess(char *input) {
+char **can_preprocess(char *input, int reprobe) {
 	
-	char **codecs = probe(input);
+	char **codecs = probe(input, reprobe);
 
 	if (codecs == NULL) {
 		printf("preprocessing failed: codecs could not be retrieved\n");
@@ -949,7 +1041,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	if (!get_opt_copy()) {
 		while (s->codecs == NULL) {
 			printf("preprocessing: trying to probe...\n");
-			s->codecs = can_preprocess(s->ffinput);
+			s->codecs = can_preprocess(s->ffinput, 0);
 
 			if (s->codecs != NULL) break;
 			printf("preprocessing: cannot get codecs retrying in two secs\n");
@@ -1014,30 +1106,50 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	s->pid = run_sync_forever2(ffcmd, s->ffoutput);
 	s->fp = NULL;// fp->pipe_pid;
 
-	sleep_ms(5*1000);
+	sleep_ms(10*1000);
 
         char **ffcodecs = NULL;	
 	int retries = 0;
+
+	//int fd, nread;
+	//char buf[2] ;
+	//fd = open(s->ffoutput, O_RDONLY);
+	printf("preprocessing: is %s alive?\n", s->ffoutput);
+	//// this will block
+	//read(fd, buf, 1);
+	//close(fd);
+	
 	while (ffcodecs == NULL) {
 		if (retries >=3) {
 			
 			printf("preprocessing: %s is not alive, giving up...\n", s->ffoutput);
 			return;
 		}
+
+			retries++;
 			printf("preprocessing: is %s alive? retry no. %d\n", s->ffoutput, retries);
-			ffcodecs = can_preprocess(s->ffoutput);
+
+			ffcodecs = can_preprocess(s->ffoutput, 1);
 
 			if (ffcodecs != NULL) break;
-			sleep_ms(2*1000);
-			retries++;
+			sleep_ms(1*1000);
 		}
 
 
-	printf("%s alive! restarting...\n", s->ffoutput);
+	printf("%s alive!\n", s->ffoutput);
 
-    	obs_source_output_video(s->source, NULL);
-   	obs_source_update(s->source, NULL);
+  	time_t current_time = time(NULL);
 
+	if ( s->last_frame_at == NULL || ( s->last_frame_at != NULL && (current_time - s->last_frame_at) > 10) ) {
+      		
+		printf("%s no frames for the last 10 secs! restarting...\n", obs_source_get_name(s->source));
+
+    		obs_source_output_video(s->source, NULL);
+   		obs_source_update(s->source, NULL);
+	} else {	
+		printf("%s last frame before %d secs\n", obs_source_get_name(s->source), (current_time - s->last_frame_at));
+
+	}
 
 }
 
@@ -1095,21 +1207,6 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 
 	UNUSED_PARAMETER(settings);
 	struct ffmpeg_source *s = bzalloc(sizeof(struct ffmpeg_source));
-
-	/**
-	 * preprocess: start
-	 */
-	bool opt_preprocess = get_opt_preprocess();
-	if (opt_preprocess) {
-		s->i = (int) obs_data_get_int(settings, "i");
-		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
-		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
-		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
-	
-		preprocess(&s);
-	}
-	// preprocess: end
-
 	s->source = source;
 
   s->source_frames = (double) 0;
@@ -1126,6 +1223,22 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 	proc_handler_add(ph, "void get_nb_frames(out int num_frames)",
 			get_nb_frames, s);
 	ffmpeg_source_update(s, settings);
+
+
+	/**
+	 * preprocess: start
+	 */
+	bool opt_preprocess = get_opt_preprocess();
+	if (opt_preprocess) {
+		s->i = (int) obs_data_get_int(settings, "i");
+		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
+		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
+		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
+		preprocess(&s);
+	}
+	// preprocess: end
+
+
 
 	return s;
 }
