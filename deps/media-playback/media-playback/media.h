@@ -92,6 +92,9 @@ struct mp_media {
 
 	bool thread_valid;
 	pthread_t thread;
+
+	int log;
+	bool initialized;
 };
 
 typedef struct mp_media mp_media_t;

@@ -388,7 +388,7 @@ static void mp_media_calc_next_ns(mp_media_t *m)
 	m->next_pts_ns = min_next_ns;
 }
 
-static bool mp_media_reset(mp_media_t *m)
+bool mp_media_reset(mp_media_t *m)
 {
 	AVStream *stream = m->fmt->streams[0];
 	int64_t seek_pos;
@@ -525,7 +525,7 @@ void my_log_callback(void *ptr, int level, const char *fmt, va_list vargs)
 
 
 
-static bool init_avformat(mp_media_t *m)
+bool init_avformat(mp_media_t *m)
 {
 	AVInputFormat *format = NULL;
 
@@ -583,7 +583,13 @@ static bool init_avformat(mp_media_t *m)
 
 static inline bool mp_media_thread(mp_media_t *m)
 {
+
 	os_set_thread_name("mp_media_thread");
+
+	if (get_opt_preprocess())
+		while(m->log != 1) {
+			sleep(1);
+		}
 
 	if (!init_avformat(m)) {
 		return false;
@@ -631,7 +637,7 @@ static inline bool mp_media_thread(mp_media_t *m)
 			if (m->has_audio)
 				mp_media_next_audio(m);
 
-			if (!mp_media_prepare_frames(m))
+			if (!mp_media_prepare_frames(m)) 
 				return false;
 			if (mp_media_eof(m))
 				continue;
@@ -715,6 +721,7 @@ bool mp_media_init(mp_media_t *media,
 		avformat_network_init();
 		initialized = true;
 	}
+	media->initialized = initialized;
 
 	if (!base_sys_ts)
 		base_sys_ts = (int64_t)os_gettime_ns();
@@ -727,7 +734,7 @@ bool mp_media_init(mp_media_t *media,
 	return true;
 }
 
-static void mp_kill_thread(mp_media_t *m)
+void mp_kill_thread(mp_media_t *m)
 {
 	if (m->thread_valid) {
 		pthread_mutex_lock(&m->mutex);

@@ -74,6 +74,10 @@ AVFilterGraph *filter_graph;
 extern bool mp_decode_init(struct mp_media *media, enum AVMediaType type,
 		bool hw);
 extern void mp_decode_free(struct mp_decode *decode);
+extern void mp_kill_thread(struct mp_media *m);
+extern bool mp_media_reset(struct mp_media *m);
+extern bool init_avformat(struct mp_media *m);
+
 
 extern void mp_decode_clear_packets(struct mp_decode *decode);
 

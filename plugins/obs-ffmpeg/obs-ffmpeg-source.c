@@ -389,7 +389,7 @@ static void source_restart (void *data, bool debug)
   bool opt_preprocess = get_opt_preprocess();
   // at start and each 60 secs
   if (opt_preprocess) {
-    if (c->restart_status == 0 || c->restart_status%10 == 0) {
+    if (c->restart_status == 0 || c->restart_status%5 == 0) {
     if ( debug )
       printf("%s restarting...\n", obs_source_get_name(c->source));
 
@@ -477,6 +477,7 @@ static void ffmpeg_source_update(void *data, obs_data_t *settings)
 		input_format = (char *)obs_data_get_string(settings,
 				"input_format");
 		s->is_looping = false;
+
 		s->close_when_inactive = true;
 
 		obs_source_set_async_unbuffered(s->source, false);
@@ -1032,9 +1033,12 @@ static void recreateFIFOAndsyncFS(char *fifo) {
 
 }
 
-
+static void ffmpeg_source_destroy(void *data);
 
 void *preprocess_thread(struct ffmpeg_source *s) {
+
+
+
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
@@ -1106,19 +1110,41 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	s->pid = run_sync_forever2(ffcmd, s->ffoutput);
 	s->fp = NULL;// fp->pipe_pid;
 
-	sleep_ms(10*1000);
+	//sleep_ms(10*1000);
 
+  	time_t current_time = time(NULL);
         char **ffcodecs = NULL;	
 	int retries = 0;
 
-	//int fd, nread;
-	//char buf[2] ;
-	//fd = open(s->ffoutput, O_RDONLY);
-	printf("preprocessing: is %s alive?\n", s->ffoutput);
-	//// this will block
-	//read(fd, buf, 1);
-	//close(fd);
+	int fd, nread;
+	char buf[0x100] ;
+	fd = open(s->ffoutput, O_RDONLY);
 	
+	int flags = fcntl(fd, F_GETFL, 0);
+	fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+	printf("preprocessing: is %s alive?\n", s->ffoutput);
+	int no_packet = 0;
+
+  	current_time = time(NULL);
+	while (1)
+    	{
+        	if (read(fd, buf, 0x100-1) > 0)
+        	{
+			break;
+        	}
+        	sleep(1);
+		if ((time(NULL) - current_time) > 20) {
+			
+			printf("preprocessing: %s is not alive, this is a candidate for restart...\n", s->ffoutput);
+			break;
+		}
+	}
+
+	
+	close(fd);
+
+	// must be ffprobable
 	while (ffcodecs == NULL) {
 		if (retries >=3) {
 			
@@ -1136,19 +1162,36 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		}
 
 
-	printf("%s alive!\n", s->ffoutput);
+	printf("%s is alive!\n", s->ffoutput);
 
-  	time_t current_time = time(NULL);
+  	current_time = time(NULL);
+	
+	mp_media_t *m = &s->media;
 
-	if ( s->last_frame_at == NULL || ( s->last_frame_at != NULL && (current_time - s->last_frame_at) > 10) ) {
-      		
-		printf("%s no frames for the last 10 secs! restarting...\n", obs_source_get_name(s->source));
+	if (m->log != 1) {
+		printf("%s starting thread...\n", obs_source_get_name(s->source));
+		m->log = 1;
+	} else {
+		if ( s->last_frame_at == NULL || ( s->last_frame_at != NULL && (current_time - s->last_frame_at) > 5) ) {
+			
 
-    		obs_source_output_video(s->source, NULL);
-   		obs_source_update(s->source, NULL);
-	} else {	
-		printf("%s last frame before %d secs\n", obs_source_get_name(s->source), (current_time - s->last_frame_at));
+			printf("%s no frames for the last 5 secs! restarting...\n", obs_source_get_name(s->source));
+					
+			m->initialized = false;
+			m = NULL;
+			obs_source_output_video(s->source, NULL);
+			obs_source_update(s->source, NULL);
+			while (m == NULL || m->initialized == false) {
+				m = &s->media;
+				sleep_ms(1000);
+			}
 
+			m->log = 1;
+
+		} else {	
+			printf("%s last frame before %d secs, nothing to do\n", obs_source_get_name(s->source), (current_time - s->last_frame_at));
+
+		}
 	}
 
 }
