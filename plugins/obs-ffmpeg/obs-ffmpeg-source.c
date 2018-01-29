@@ -69,6 +69,8 @@ struct ffmpeg_source {
   // rescue
   double source_frames;
   unsigned long last_frame_at;
+  unsigned long last_25_fps;
+  unsigned long started_at;
   bool restarted;
 
   // preprocess
@@ -112,7 +114,6 @@ void sleep_ms(int milliseconds) {
 	ts.tv_nsec = (milliseconds % 1000) * 1000000;
 	nanosleep(&ts, NULL);
 }
-
 
 
 
@@ -330,12 +331,19 @@ static bool rescue (void *data, bool debug)
     diff = (double) source_frames - c->source_frames;
 
     if ( diff > 0 && c->last_frame_at != current_time ) {
-      if (c->restarted == true)
+      if (c->restarted == true) {
 	    	printf("rescue: resuming to normal state after restart\n");
+		c->started_at = time(NULL);
+		c->last_25_fps = time(NULL);
+      }
       c->last_frame_at = current_time;
       c->restarted = false;
       c->restart_status = -1;
-
+      if (c->source->video_fps >= 25.0) {
+	c->last_25_fps = time(NULL);
+      } else {
+	      printf("%s: %f fps\n", obs_source_get_name(c->source), c->source->video_fps);
+      }
 
       if ( debug ) {
         time_info = localtime((time_t) &current_time);
@@ -351,14 +359,30 @@ static bool rescue (void *data, bool debug)
       source_restart(c, debug);
     }
 
-    if ( c->last_frame_at != NULL && (current_time - c->last_frame_at) > 10 ) {
-      printf("%s 10 seconds without new frames!\n", obs_source_get_name(c->source));
+
+    //printf("d: %f\n", (current_time-c->last_25_fps));
+
+    // more than 10 secs without a frame; or fps below 25 for more than 2 secs
+    if ( ( c->last_frame_at != NULL &&  
+			    ((current_time - c->last_frame_at) > 10 ) ) || 
+			   (c->last_25_fps != NULL && (c->source->video_fps < 25.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) 
+		    ) {
+      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs! fps: %f, last 25 fps before %d secs\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps));
 
       source_restart(c, debug);
 
       // restart the counter so that the log message will appear again in the next 10 seconds
       c->last_frame_at = current_time;
+	c->last_25_fps = time(NULL);
+	c->started_at = time(NULL);
     }
+  } else {
+	  if (c->started_at == 0) 
+	c->started_at = time(NULL);
+	  if (current_time - c->started_at > 5) {
+	  printf("%s starting... \n",  obs_source_get_name(c->source));
+	c->started_at = time(NULL);
+	  }
   }
 
   // update source_frames
