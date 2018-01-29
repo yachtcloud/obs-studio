@@ -25,6 +25,7 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include <util/dstr.h>
+#include <regex.h>  
 
 #include <limits.h>
 #include <string.h>
@@ -84,6 +85,8 @@ struct ffmpeg_source {
   char *ffinput;
   char *ffoutput;
   int i;
+  float speed;
+  int gave_up;
 
 	struct SwsContext *sws_ctx;
 	int sws_width;
@@ -326,6 +329,9 @@ static bool rescue (void *data, bool debug)
   char timeString[9];
   bool attempting_restart;
 
+
+  //printf("speed: %f\n", c->speed);
+
   if ( c->source_frames != 0 ) {
 
     diff = (double) source_frames - c->source_frames;
@@ -360,14 +366,13 @@ static bool rescue (void *data, bool debug)
     }
 
 
-    //printf("d: %f\n", (current_time-c->last_25_fps));
-
     // more than 10 secs without a frame; or fps below 25 for more than 2 secs
     if ( ( c->last_frame_at != NULL &&  
 			    ((current_time - c->last_frame_at) > 10 ) ) || 
-			   (c->last_25_fps != NULL && (c->source->video_fps < 25.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) 
+			   (c->last_25_fps != NULL && (c->source->video_fps < 25.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) ||
+		( c->speed < 0.95 && (current_time - c->started_at) > 60 ) 
 		    ) {
-      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs! fps: %f, last 25 fps before %d secs\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps));
+      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs OR ffmpeg speed < 0.95! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
 
       source_restart(c, debug);
 
@@ -383,6 +388,11 @@ static bool rescue (void *data, bool debug)
 	  printf("%s starting... \n",  obs_source_get_name(c->source));
 	c->started_at = time(NULL);
 	  }
+
+	if (c->gave_up == 1) {
+		source_restart(c, debug);
+
+	}
   }
 
   // update source_frames
@@ -695,17 +705,135 @@ char** explode(char delimiter, char* str, int **size) {
 }
 
 
+struct arg_struct {
+    struct ffmpeg_source *s; 
+    int p_stderr;
+    
+};
+
+
+char * trim(char * s) {
+	char * p = s;
+	int l = strlen(p);
+
+	while(isspace(p[l - 1])) p[--l] = 0;
+	while(* p && isspace(* p)) ++p, --l;
+
+	memmove(s, p, l + 1);
+	return s;
+}   
+
+
+
+void str_replace(char *target, const char *needle, const char *replacement)
+{
+    char buffer[1024] = { 0 };
+    char *insert_point = &buffer[0];
+    const char *tmp = target;
+    size_t needle_len = strlen(needle);
+    size_t repl_len = strlen(replacement);
+
+    while (1) {
+        const char *p = strstr(tmp, needle);
+
+        // walked past last occurrence of needle; copy remaining part
+        if (p == NULL) {
+            strcpy(insert_point, tmp);
+            break;
+        }
+
+        // copy part before needle
+        memcpy(insert_point, tmp, p - tmp);
+        insert_point += p - tmp;
+
+        // copy replacement string
+        memcpy(insert_point, replacement, repl_len);
+        insert_point += repl_len;
+
+        // adjust pointers, move on
+        tmp = p + needle_len;
+    }
+
+    // write altered string back to target
+    strcpy(target, buffer);
+}
+
+
+
+void parse_stderr_thread(void *arguments) {
+
+	struct arg_struct *args = (struct arg_struct *)arguments;
+
+	struct ffmpeg_source *s = args->s; 
+    	int p_stderr = args->p_stderr;
+
+        char buffer[140];
+
+	while (read(p_stderr, buffer, sizeof(buffer)) != 0)
+	{
+
+		regex_t regex;
+		int reti;
+		char msgbuf[100];
+
+		/* Compile regular expression */
+		reti = regcomp(&regex, "speed=\w*([0-9]+\\.[0-9]+)?", REG_EXTENDED);
+		if (reti) {
+			    fprintf(stderr, "Could not compile regex\n");
+			        exit(1);
+		}
+
+		   regmatch_t pmatch[10];
+
+		   int len;
+		   char result[100];
+
+		/* Execute regular expression */
+		reti = regexec(&regex, buffer, 10, pmatch, REG_NOTBOL);
+		if (!reti) {
+
+			for (int i = 0; pmatch[i].rm_so != -1; i++)
+			   {
+			      len = pmatch[i].rm_eo - pmatch[i].rm_so;
+			      memcpy(result, buffer + pmatch[i].rm_so, len);
+			      result[len] = '\0';
+
+				if (i==1) {
+					str_replace(result, ".", ",");
+					s->speed = (float) atof(result);
+					if (s->speed < 0.95) {
+						printf("%s: speed %f\n", obs_source_get_name(s->source), s->speed);
+						
+					}
+				}
+			   }
+		}
+		else if (reti == REG_NOMATCH) {
+			   // puts("No match");
+		}
+		else {
+			    regerror(reti, &regex, msgbuf, sizeof(msgbuf));
+			    fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+		}
+
+		/* Free memory allocated to the pattern buffer by regcomp() */
+		regfree(&regex);
+	}
+
+	return NULL;
+
+}
 
 #define READ 0
 #define WRITE 1
 
 pid_t
-popen2(const char *command, int *infp, int *outfp, char *fifo)
+popen2(struct ffmpeg_source *s, const char *command, int *infp, int *outfp, char *fifo)
 {
     int p_stdin[2], p_stdout[2], p_stderr[2];
     pid_t pid;
 
-    if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0  || pipe(p_stderr) != 0)
+    if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0 || pipe(p_stderr))
         return -1;
 
 
@@ -721,10 +849,17 @@ popen2(const char *command, int *infp, int *outfp, char *fifo)
     int fd = open(fifo, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
 
     dup2(fd, 1);   // make stdout go to file
-    dup2(fd, 2);   // make stderr go to file - you may choose to not do this
+    
+    close(p_stderr[0]);
+    dup2(p_stderr[1], 2);
+
+    //dup2(p, 2);   // make stderr go to file - you may choose to not do this
                    // or perhaps send stderr to another file
 
     close(fd);     // fd no longer needed - the dup'ed handles are sufficient
+
+
+
 
 	char **brk = NULL;
 	int size = split(command, ' ', &brk);
@@ -737,6 +872,18 @@ popen2(const char *command, int *infp, int *outfp, char *fifo)
         perror("execl");
         exit(1);
     }
+
+
+	close(p_stderr[1]);  // close the write end of the pipe in the parent
+	
+
+    struct arg_struct *args = malloc(sizeof(struct arg_struct));
+    args->s =  s;
+    args->p_stderr =  p_stderr[0];
+
+pthread_t tid;
+	int err = pthread_create(&tid, NULL, &parse_stderr_thread,(void *)args);
+
         
     // close unused descriptors on parent process.
     close(p_stdin[READ]);
@@ -755,8 +902,8 @@ popen2(const char *command, int *infp, int *outfp, char *fifo)
     return pid;
 }
 
-static pid_t run_sync_forever2(char *cmd, char *fifo) {
-	return popen2(cmd, malloc(sizeof(int)), malloc(sizeof(int)), fifo);
+static pid_t run_sync_forever2(struct ffmpeg_source *s, char *cmd, char *fifo) {
+	return popen2(s, cmd, malloc(sizeof(int)), malloc(sizeof(int)), fifo);
 }
 
 static char *run_sync_forever(char *cmd) {
@@ -807,51 +954,6 @@ static char *run_sync(char *cmd) {
 	pclose(fp);
 	return out;
 }
-
-char * trim(char * s) {
-	char * p = s;
-	int l = strlen(p);
-
-	while(isspace(p[l - 1])) p[--l] = 0;
-	while(* p && isspace(* p)) ++p, --l;
-
-	memmove(s, p, l + 1);
-	return s;
-}   
-
-void str_replace(char *target, const char *needle, const char *replacement)
-{
-    char buffer[1024] = { 0 };
-    char *insert_point = &buffer[0];
-    const char *tmp = target;
-    size_t needle_len = strlen(needle);
-    size_t repl_len = strlen(replacement);
-
-    while (1) {
-        const char *p = strstr(tmp, needle);
-
-        // walked past last occurrence of needle; copy remaining part
-        if (p == NULL) {
-            strcpy(insert_point, tmp);
-            break;
-        }
-
-        // copy part before needle
-        memcpy(insert_point, tmp, p - tmp);
-        insert_point += p - tmp;
-
-        // copy replacement string
-        memcpy(insert_point, replacement, repl_len);
-        insert_point += repl_len;
-
-        // adjust pointers, move on
-        tmp = p + needle_len;
-    }
-
-    // write altered string back to target
-    strcpy(target, buffer);
-}
-
 int file_exists (char *filename)
 {
   struct stat   buffer;   
@@ -1131,7 +1233,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	recreateFIFOAndsyncFS(s->ffoutput);
 
 	printf("preprocess: executing \"%s\"...\n", ffcmd);
-	s->pid = run_sync_forever2(ffcmd, s->ffoutput);
+	s->pid = run_sync_forever2(s, ffcmd, s->ffoutput);
 	s->fp = NULL;// fp->pipe_pid;
 
 	//sleep_ms(10*1000);
@@ -1150,6 +1252,8 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	printf("preprocessing: is %s alive?\n", s->ffoutput);
 	int no_packet = 0;
 
+	int gave_up = 0;
+
   	current_time = time(NULL);
 	while (1)
     	{
@@ -1159,7 +1263,8 @@ void *preprocess_thread(struct ffmpeg_source *s) {
         	}
         	sleep(1);
 		if ((time(NULL) - current_time) > 20) {
-			
+	
+			s->gave_up = 1;		
 			printf("preprocessing: %s is not alive, this is a candidate for restart...\n", s->ffoutput);
 			break;
 		}
@@ -1173,6 +1278,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		if (retries >=3) {
 			
 			printf("preprocessing: %s is not alive, giving up...\n", s->ffoutput);
+			s->gave_up = 1;
 			return;
 		}
 
@@ -1192,7 +1298,21 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	
 	mp_media_t *m = &s->media;
 
+	while(s->speed < 0.95) {
+		printf("%s waiting for %f > 0.95...\n", obs_source_get_name(s->source), s->speed);
+
+		sleep_ms(1*1000);
+		if ((time(NULL) - current_time) > 20) {
+			
+			s->gave_up = 1;
+			printf("preprocessing: %s < 0.95 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
+			return;
+		}
+
+	}
+
 	if (m->log != 1) {
+	
 		printf("%s starting thread...\n", obs_source_get_name(s->source));
 		m->log = 1;
 	} else {
@@ -1223,6 +1343,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 static void preprocess(struct ffmpeg_source **s_p) {
 
 	struct ffmpeg_source *s = *s_p;
+	s->gave_up = 0;
 
 	if (s->fp) {
 		printf("FP close\n");
@@ -1298,6 +1419,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 	bool opt_preprocess = get_opt_preprocess();
 	if (opt_preprocess) {
 		s->i = (int) obs_data_get_int(settings, "i");
+		s->gave_up = 0;
 		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
 		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
 		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
