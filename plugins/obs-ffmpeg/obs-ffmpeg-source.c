@@ -70,6 +70,7 @@ struct ffmpeg_source {
   // rescue
   double source_frames;
   unsigned long last_frame_at;
+  unsigned long real_last_frame_at;
   unsigned long last_25_fps;
   unsigned long started_at;
   bool restarted;
@@ -325,7 +326,7 @@ static bool rescue (void *data, bool debug)
   double source_frames = obs_source_get_total_frames(c->source);
   double diff;
   time_t current_time = time(NULL);
-  struct tm * time_info;
+  struct tm * time_info = NULL;
   char timeString[9];
   bool attempting_restart;
 
@@ -342,10 +343,11 @@ static bool rescue (void *data, bool debug)
 		c->started_at = time(NULL);
 		c->last_25_fps = time(NULL);
       }
+      c->real_last_frame_at = current_time;
       c->last_frame_at = current_time;
       c->restarted = false;
       c->restart_status = -1;
-      if (c->source->video_fps >= 25.0) {
+      if (c->source->video_fps >= 24.0) {
 	c->last_25_fps = time(NULL);
       } else {
 	      printf("%s: %f fps\n", obs_source_get_name(c->source), c->source->video_fps);
@@ -369,7 +371,7 @@ static bool rescue (void *data, bool debug)
     // more than 10 secs without a frame; or fps below 25 for more than 2 secs
     if ( ( c->last_frame_at != NULL &&  
 			    ((current_time - c->last_frame_at) > 10 ) ) || 
-			   (c->last_25_fps != NULL && (c->source->video_fps < 25.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) ||
+			   (c->last_25_fps != NULL && (c->source->video_fps < 24.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) ||
 		( c->speed < 0.95 && (current_time - c->started_at) > 60 ) 
 		    ) {
       printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs OR ffmpeg speed < 0.95! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
@@ -378,7 +380,7 @@ static bool rescue (void *data, bool debug)
 
       // restart the counter so that the log message will appear again in the next 10 seconds
       c->last_frame_at = current_time;
-	c->last_25_fps = time(NULL);
+	//c->last_25_fps = time(NULL);
 	c->started_at = time(NULL);
     }
   } else {
@@ -394,6 +396,9 @@ static bool rescue (void *data, bool debug)
 
 	}
   }
+
+  if (time_info != NULL)
+    free(time_info);
 
   // update source_frames
   c->source_frames = source_frames;
@@ -820,6 +825,8 @@ void parse_stderr_thread(void *arguments) {
 		regfree(&regex);
 	}
 
+	free(args);
+
 	return NULL;
 
 }
@@ -903,7 +910,12 @@ pthread_t tid;
 }
 
 static pid_t run_sync_forever2(struct ffmpeg_source *s, char *cmd, char *fifo) {
-	return popen2(s, cmd, malloc(sizeof(int)), malloc(sizeof(int)), fifo);
+	int *infp = malloc(sizeof(int));
+	int *outfp = malloc(sizeof(int));
+	pid_t pid = popen2(s, cmd, infp, outfp, fifo);
+	free(infp);
+	free(outfp);
+	return pid;
 }
 
 static char *run_sync_forever(char *cmd) {
@@ -1023,11 +1035,24 @@ static char ** probe(char *input, int reprobe) {
 			fclose(fp);
 		    }
 
+
 		printf("probe: got codec %s, %sx%s, index %s\n", data[1], data[2], data[3], data[0]);
 	} else {
 		printf("probe: failed to probe '%s'\n", input);
+		data = NULL;
+
+
 		return NULL;
 	}
+
+
+	//free(size);
+	//free(cmdres);
+	free(cache_data);
+	free(cache_path);
+	free(input_hash);
+	free(cmd);
+
 	return data;
 }
 
@@ -1054,6 +1079,7 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 
 	if (strcmp(out, "") == 0) {
 		printf("get rescale size: no output '%s'\n", rescalecmd);
+		free(rescalecmd);
 		return NULL;
 	}
 
@@ -1062,17 +1088,21 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 
 	if (size != 2) {
 		printf("get rescale size: incorrect format '%s'\n", out);
+		free(rescalecmd);
 		return NULL;
 	}
 
 	int r_width = atoi(resize_to[0]);
 	int r_height = atoi(resize_to[1]);
 
+	free(rescalecmd);
+	//free(size);
+	free(resize_to);
+
 	if (r_width > s_width) {
 		printf("get rescale size: upscaling detected, disabling rescaling\n");
 		return NULL;
 	}
-
 
 	if (s_width <= 0) {
 		printf("get rescale size: incorrect stream width '%d'\n", s_width);
@@ -1163,9 +1193,6 @@ static void ffmpeg_source_destroy(void *data);
 
 void *preprocess_thread(struct ffmpeg_source *s) {
 
-
-
-
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	if (!get_opt_copy()) {
@@ -1236,6 +1263,8 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	s->pid = run_sync_forever2(s, ffcmd, s->ffoutput);
 	s->fp = NULL;// fp->pipe_pid;
 
+	free(ffcmd);
+
 	//sleep_ms(10*1000);
 
   	time_t current_time = time(NULL);
@@ -1291,6 +1320,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			sleep_ms(1*1000);
 		}
 
+	free(ffcodecs);
 
 	printf("%s is alive!\n", s->ffoutput);
 
@@ -1316,7 +1346,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		printf("%s starting thread...\n", obs_source_get_name(s->source));
 		m->log = 1;
 	} else {
-		if ( s->last_frame_at == NULL || ( s->last_frame_at != NULL && (current_time - s->last_frame_at) > 5) ) {
+		if ( s->last_frame_at == NULL || ( s->real_last_frame_at != NULL && (current_time - s->real_last_frame_at) > 5) ) {
 			
 
 			printf("%s no frames for the last 5 secs! restarting...\n", obs_source_get_name(s->source));
@@ -1333,7 +1363,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			m->log = 1;
 
 		} else {	
-			printf("%s last frame before %d secs, nothing to do\n", obs_source_get_name(s->source), (current_time - s->last_frame_at));
+			printf("%s last frame before %d secs, nothing to do\n", obs_source_get_name(s->source), (current_time - s->real_last_frame_at));
 
 		}
 	}
