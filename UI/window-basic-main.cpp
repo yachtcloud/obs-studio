@@ -682,6 +682,25 @@ void OBSBasic::LogScenes()
 }
 
 
+static void execkill(char *cmd) {
+
+        printf("execkill: executing '%s'\n", cmd);
+
+        FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("sync: failed to run command\n" );
+                return;
+        }
+        
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("%s\n", temp);
+        }
+        
+        pclose(fp);
+}
+
+
 
 static void syncfs() {
 
@@ -731,12 +750,61 @@ static void mkdir_p(char *path) {
 
 int num_streams = 0;
 
+void sleep_ms(int milliseconds) {
+        struct timespec ts;
+        ts.tv_sec = milliseconds / 1000;
+        ts.tv_nsec = (milliseconds % 1000) * 1000000;
+        nanosleep(&ts, NULL);
+}
+
+
 obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) {
 
         DARRAY(obs_source_t*) sources;
         size_t count;
         size_t i;
 	bool enabled = get_opt_preprocess();
+
+
+	if (enabled) {
+
+		char * buffer = 0;
+		long length;
+		FILE * f = fopen ("/tmp/obs/pid.txt", "r");
+
+		if (f)
+		{
+		  fseek (f, 0, SEEK_END);
+		  length = ftell (f);
+		  fseek (f, 0, SEEK_SET);
+		  buffer = (char *)malloc(sizeof(char)*length);
+		  if (buffer)
+		  {
+		    fread (buffer, 1, length, f);
+		  }
+		  fclose (f);
+		}
+
+		if (buffer) {
+
+			execkill(buffer);
+			sleep_ms(3*1000);
+		}
+
+
+
+		int pid = getpid();
+		f = fopen("/tmp/obs/pid.txt", "w");
+		if (f == NULL)
+		{
+			printf("Error opening file!\n");
+		}
+		fprintf(f, "kill -9 %d ", pid);
+		fclose(f);
+
+
+
+	}
 
         da_init(sources);
 
@@ -777,6 +845,7 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 	
 
 				printf("preprocess: %s -> %s\n", obs_data_get_string(settings, "ffinput"),  obs_data_get_string(settings, "input"));
+
 			} else {
 																			 
 				if (obs_data_get_string(settings, "ffinput") && strcmp(obs_data_get_string(settings, "ffinput"), "") != 0) {

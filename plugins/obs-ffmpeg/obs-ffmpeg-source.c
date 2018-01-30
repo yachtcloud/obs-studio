@@ -865,6 +865,14 @@ popen2(struct ffmpeg_source *s, const char *command, int *infp, int *outfp, char
 
     close(fd);     // fd no longer needed - the dup'ed handles are sufficient
 
+				int pid = getpid();
+                                FILE *f = fopen("/tmp/obs/pid.txt", "a");
+                                if (f == NULL)
+                                {           
+                                        printf("Error opening file!\n");
+                                }
+                                fprintf(f, "%d ", pid);
+                                fclose(f);
 
 
 
