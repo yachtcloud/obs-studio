@@ -768,6 +768,9 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 
 	if (enabled) {
 
+		mkdir_p("/tmp/obs");
+
+
 		char * buffer = 0;
 		long length;
 		FILE * f = fopen ("/tmp/obs/pid.txt", "r");
