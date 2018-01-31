@@ -372,9 +372,9 @@ static bool rescue (void *data, bool debug)
     if ( ( c->last_frame_at != NULL &&  
 			    ((current_time - c->last_frame_at) > 10 ) ) || 
 			   (c->last_25_fps != NULL && (c->source->video_fps < 24.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) ||
-		( c->speed < 0.95 && (current_time - c->started_at) > 60 ) 
+		( c->speed < 0.8 && (current_time - c->started_at) > 60 ) 
 		    ) {
-      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs OR ffmpeg speed < 0.95! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
+      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs OR ffmpeg speed < 0.8! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
 
       source_restart(c, debug);
 
@@ -806,7 +806,7 @@ void parse_stderr_thread(void *arguments) {
 				if (i==1) {
 					str_replace(result, ".", ",");
 					s->speed = (float) atof(result);
-					if (s->speed < 0.95) {
+					if (s->speed < 0.8) {
 						printf("%s: speed %f\n", obs_source_get_name(s->source), s->speed);
 						
 					}
@@ -1336,14 +1336,14 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	
 	mp_media_t *m = &s->media;
 
-	while(s->speed < 0.95) {
-		printf("%s waiting for %f > 0.95...\n", obs_source_get_name(s->source), s->speed);
+	while(s->speed < 0.8) {
+		printf("%s waiting for %f > 0.8...\n", obs_source_get_name(s->source), s->speed);
 
 		sleep_ms(1*1000);
 		if ((time(NULL) - current_time) > 20) {
 			
 			s->gave_up = 1;
-			printf("preprocessing: %s < 0.95 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
+			printf("preprocessing: %s < 0.8 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
 			return;
 		}
 
