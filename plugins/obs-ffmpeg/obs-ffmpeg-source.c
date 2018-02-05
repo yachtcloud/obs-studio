@@ -1226,13 +1226,13 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	strcpy(ffcmd, "");
 	if (get_opt_copy() || s->codecs == NULL) {
 
-		strcpy(ffcmd, "-i ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -i ");
 		strcat(ffcmd, s->ffinput);
-		strcat(ffcmd, " -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1 ");//> \"");
+		strcat(ffcmd, " -c:v copy -c:a copy -reset_timestamps 1 -f mpegts pipe:1");//> \"");
 
 
 	} else {
-		strcpy(ffcmd, "/usr/local/bin/ffmpeg -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
@@ -1241,25 +1241,30 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
-		strcat(ffcmd, " -surfaces 8 -drop_second_field 1 -deint 2 -i ");
-		strcat(ffcmd, s->ffinput);
-		strcat(ffcmd, " ");
-		
+		strcat(ffcmd, " -surfaces 8 -drop_second_field 1 -deint 2 ");
+	
 		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
-			strcat(ffcmd, "-filter:v scale_npp=w=");
+			strcat(ffcmd, "-resize ");
 			strcat(ffcmd, s->rescale[0]);
-			strcat(ffcmd, ":h=");
+			strcat(ffcmd, "x");
 			strcat(ffcmd, s->rescale[1]);
-			strcat(ffcmd, ":format=nv12:interp_algo=super,hwdownload,format=nv12 ");
+			strcat(ffcmd, " ");
 		} else {
 			printf("preprocess: no hw rescaling\n");
 		}
 
+
+		strcat(ffcmd, "-i ");
+
+		strcat(ffcmd, s->ffinput);
+		strcat(ffcmd, " ");
+	
 		// omit audio select first video stream
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -c:v h264_nvenc -force_key_frames expr:gte(t,n_forced*2) -g 50 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -b:v 2500k -minrate 2500k -maxrate 3500k -movflags frag_keyframe+empty_moov+faststart ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -force_key_frames expr:gte(t,n_forced*0.2) -g 5 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 0 ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		// -b:v 2500k -minrate 2500k -maxrate 3500k
 		strcat(ffcmd, "-f mpegts pipe:1");
 
 	}
