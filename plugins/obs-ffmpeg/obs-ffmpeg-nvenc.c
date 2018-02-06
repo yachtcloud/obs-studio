@@ -91,8 +91,8 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 	int ret;
 
 	AVDictionary * av_dict_opts = NULL;
-	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*2)", 0);
-	av_dict_set( &av_dict_opts, "g", "50", 0);
+	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*0.5)", 0);
+	av_dict_set( &av_dict_opts, "g", "13", 0);
 	av_dict_set( &av_dict_opts, "bufsize", "0", 0);
 
 	ret = avcodec_open2(enc->context, enc->nvenc, &av_dict_opts);
@@ -214,7 +214,7 @@ static bool nvenc_update(void *data, obs_data_t *settings)
 		enc->context->gop_size = keyint_sec * voi->fps_num /
 			voi->fps_den;
 	else
-		enc->context->gop_size = 250;
+		enc->context->gop_size = 13;
 
 	enc->height = enc->context->height;
 

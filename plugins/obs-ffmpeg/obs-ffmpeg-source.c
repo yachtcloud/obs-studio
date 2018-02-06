@@ -1464,7 +1464,20 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 		s->i = (int) obs_data_get_int(settings, "i");
 		s->gave_up = 0;
 		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
-		s->ffinput =  (char *)obs_data_get_string(settings, "ffinput");
+		char *ffinput = malloc(sizeof(char)*(strlen((char *)obs_data_get_string(settings, "ffinput"))+100));
+		strcpy(ffinput, (char *)obs_data_get_string(settings, "ffinput"));
+
+		int *size = (int*) malloc(sizeof(int));
+		char **data = explode('?', ffinput, &size);
+		if (size == 2) {
+
+			strcpy(ffinput, data[0]);
+
+		}
+
+		strcat(ffinput, "?buffer_size=1000000&fifo_size=1000000&overrun_nonfatal=1&timeout=300000000");
+		s->ffinput = ffinput;
+
 		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");
 		preprocess(&s);
 	}
