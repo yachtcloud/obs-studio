@@ -59,6 +59,9 @@
 #define FF_BLOG(level, format, ...) \
 	FF_LOG_S(s->source, level, format, ##__VA_ARGS__)
 
+
+int preprocess_stream = 1;
+
 static bool video_frame(struct ff_frame *frame, void *opaque);
 static bool video_format(AVCodecContext *codec_context, void *opaque);
 
@@ -372,7 +375,7 @@ static bool rescue (void *data, bool debug)
     if ( ( c->last_frame_at != NULL &&  
 			    ((current_time - c->last_frame_at) > 10 ) ) || 
 			   (c->last_25_fps != NULL && (c->source->video_fps < 10.0) && (current_time - c->last_25_fps) > 30 && (current_time - c->started_at) > 60 ) ||
-		( c->speed < 0.7 && (current_time - c->started_at) > 60 ) 
+		( c->speed < 0.95 && (current_time - c->started_at) > 120 ) 
 		    ) {
       printf("%s 10 seconds without new frames OR fps below 10 for more than 30 secs OR ffmpeg speed < 0.7! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
 
@@ -810,8 +813,8 @@ void parse_stderr_thread(void *arguments) {
 				if (i==1) {
 					str_replace(result, ".", ",");
 					s->speed = (float) atof(result);
-					if (s->speed < 0.7) {
-						printf("%s: speed %f\n", obs_source_get_name(s->source), s->speed);
+					if (s->speed < 0.95) {
+						printf("%s: warning speed %f\n", obs_source_get_name(s->source), s->speed);
 						
 					}
 				}
@@ -986,7 +989,7 @@ int file_exists (char *filename)
 }
 
 
-static char ** probe(char *input, int reprobe) {
+static char ** probe(char *input, int reprobe, char timeout[]) {
 
 	char *cmdres;
 	char *input_hash = (char *) malloc(1000*sizeof(char));
@@ -1027,7 +1030,9 @@ static char ** probe(char *input, int reprobe) {
 
 	char *cmd = (char*) malloc(1000*sizeof(char));
 	char **codecs = (char **) malloc(6*sizeof(char *));
-	strcpy(cmd, "timeout 20s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height,index -of default=noprint_wrappers=1:nokey=1 \"");
+	strcpy(cmd, "timeout ");
+	strcat(cmd, timeout);
+	strcat(cmd, "s ffprobe -v quiet -select_streams v:0 -show_entries stream=codec_name,width,height,index -of default=noprint_wrappers=1:nokey=1 \"");
 	strcat(cmd, input);
 	strcat(cmd, "\" | head -4 2>/dev/null");
 
@@ -1138,9 +1143,9 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 	return r;
 }
 
-char **can_preprocess(char *input, int reprobe) {
+char **can_preprocess(char *input, int reprobe, char timeout[]) {
 	
-	char **codecs = probe(input, reprobe);
+	char **codecs = probe(input, reprobe, timeout);
 
 	if (codecs == NULL) {
 		printf("preprocessing failed: codecs could not be retrieved\n");
@@ -1206,9 +1211,13 @@ static void ffmpeg_source_destroy(void *data);
 
 void *preprocess_thread(struct ffmpeg_source *s) {
 
+	if (0 && preprocess_stream < s->i)
+		while  (preprocess_stream != s->i) {
+			sleep_ms(10);
+		}
 
-	printf("preprocess: waiting 3 secs for prev processes to end...\n");
-	sleep_ms(3*1000);
+	//printf("preprocess: waiting 3 secs for prev processes to end...\n");
+	//sleep_ms(3*1000);
 
 
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
@@ -1216,7 +1225,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	if (!get_opt_copy()) {
 		while (s->codecs == NULL) {
 			printf("preprocessing: trying to probe...\n");
-			s->codecs = can_preprocess(s->ffinput, 0);
+			s->codecs = can_preprocess(s->ffinput, 0, "20");
 
 			if (s->codecs != NULL) break;
 			printf("preprocessing: cannot get codecs retrying in two secs\n");
@@ -1242,7 +1251,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 
 	} else {
-		strcpy(ffcmd, "/usr/local/bin/ffmpeg -probesize 1000000 -analyzeduration 0 -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -rtbufsize 100M -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
@@ -1253,7 +1262,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		}
 		strcat(ffcmd, " -surfaces 8 -drop_second_field 1 -deint 2 ");
 	
-		s->rescale = get_rescale_size(s->scene_name, s->ffinput, atoi(s->codecs[2]), atoi(s->codecs[3]));
+		s->rescale = get_rescale_size(s->scene_name, s->input, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
 			strcat(ffcmd, "-resize ");
 			strcat(ffcmd, s->rescale[0]);
@@ -1273,7 +1282,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		// omit audio select first video stream
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.1) -g 5 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 0 -vsync 1 ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.1) -g 5 -bf 2 -qp 19 -profile:v main -level 4.0 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 64k ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
 		// -b:v 2500k -minrate 2500k -maxrate 3500k
 		strcat(ffcmd, "-f mpegts pipe:1");
 
@@ -1313,17 +1322,19 @@ void *preprocess_thread(struct ffmpeg_source *s) {
         	{
 			break;
         	}
-        	sleep(1);
+        	sleep(10);
 		if ((time(NULL) - current_time) > 20) {
 	
 			s->gave_up = 1;		
-			printf("preprocessing: %s is not alive, this is a candidate for restart...\n", s->ffoutput);
-			break;
+			printf("preprocessing: %s any packet on the output for 20 secs...\n", s->ffoutput);
+			return;
 		}
 	}
 
 	
 	close(fd);
+
+	sleep_ms(250);
 
 	// must be ffprobable
 	while (ffcodecs == NULL) {
@@ -1337,7 +1348,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			retries++;
 			printf("preprocessing: is %s alive? retry no. %d\n", s->ffoutput, retries);
 
-			ffcodecs = can_preprocess(s->ffoutput, 1);
+			ffcodecs = can_preprocess(s->ffoutput, 1, "10");
 
 			if (ffcodecs != NULL) break;
 			sleep_ms(1*1000);
@@ -1351,14 +1362,16 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	
 	mp_media_t *m = &s->media;
 
-	while(s->speed < 0.7) {
-		printf("%s waiting for %f > 0.7...\n", obs_source_get_name(s->source), s->speed);
+	// this will be handled at runtime
+	if (0)
+	while(s->speed < 0.8) {
+		printf("%s waiting for %f > 0.8...\n", obs_source_get_name(s->source), s->speed);
 
 		sleep_ms(1*1000);
-		if ((time(NULL) - current_time) > 20) {
-			
+		if ((time(NULL) - current_time) > 180) {
+			// if speed will not raise quicky kill
 			s->gave_up = 1;
-			printf("preprocessing: %s < 0.7 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
+			printf("preprocessing: %s < 0.8 for 10 secs , this is a candidate for restart...\n", s->ffoutput);
 			return;
 		}
 
@@ -1368,6 +1381,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	
 		printf("%s starting thread...\n", obs_source_get_name(s->source));
 		obs_source_output_video(s->source, NULL);
+		preprocess_stream++;
 		m->log = 1;
 	} else {
 		if ( s->last_frame_at == NULL || ( s->real_last_frame_at != NULL && (current_time - s->real_last_frame_at) > 5) ) {
