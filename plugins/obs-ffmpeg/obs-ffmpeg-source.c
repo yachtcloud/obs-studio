@@ -371,10 +371,10 @@ static bool rescue (void *data, bool debug)
     // more than 10 secs without a frame; or fps below 25 for more than 2 secs
     if ( ( c->last_frame_at != NULL &&  
 			    ((current_time - c->last_frame_at) > 10 ) ) || 
-			   (c->last_25_fps != NULL && (c->source->video_fps < 24.0) && (current_time - c->last_25_fps) > 5 && (current_time - c->started_at) > 60 ) ||
-		( c->speed < 0.8 && (current_time - c->started_at) > 60 ) 
+			   (c->last_25_fps != NULL && (c->source->video_fps < 10.0) && (current_time - c->last_25_fps) > 30 && (current_time - c->started_at) > 60 ) ||
+		( c->speed < 0.7 && (current_time - c->started_at) > 60 ) 
 		    ) {
-      printf("%s 10 seconds without new frames OR fps below 25 for more than 2 secs OR ffmpeg speed < 0.8! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
+      printf("%s 10 seconds without new frames OR fps below 10 for more than 30 secs OR ffmpeg speed < 0.7! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
 
       source_restart(c, debug);
 
@@ -774,8 +774,12 @@ void parse_stderr_thread(void *arguments) {
 
         char buffer[140];
 
+	// wait for ffmpeg to start
+	sleep_ms(1*1000);
+
 	while (read(p_stderr, buffer, sizeof(buffer)) != 0)
 	{
+
 
 		regex_t regex;
 		int reti;
@@ -784,8 +788,8 @@ void parse_stderr_thread(void *arguments) {
 		/* Compile regular expression */
 		reti = regcomp(&regex, "speed=\w*([0-9]+\\.[0-9]+)?", REG_EXTENDED);
 		if (reti) {
-			    fprintf(stderr, "Could not compile regex\n");
-			        exit(1);
+			    printf("Could not compile regex\n");
+			    continue;
 		}
 
 		   regmatch_t pmatch[10];
@@ -806,7 +810,7 @@ void parse_stderr_thread(void *arguments) {
 				if (i==1) {
 					str_replace(result, ".", ",");
 					s->speed = (float) atof(result);
-					if (s->speed < 0.8) {
+					if (s->speed < 0.7) {
 						printf("%s: speed %f\n", obs_source_get_name(s->source), s->speed);
 						
 					}
@@ -814,18 +818,19 @@ void parse_stderr_thread(void *arguments) {
 			   }
 		}
 		else if (reti == REG_NOMATCH) {
-			   // puts("No match");
 		}
 		else {
 			    regerror(reti, &regex, msgbuf, sizeof(msgbuf));
-			    fprintf(stderr, "Regex match failed: %s\n", msgbuf);
+			    printf("Regex match failed: %s\n", msgbuf);
 		}
 
 		/* Free memory allocated to the pattern buffer by regcomp() */
 		regfree(&regex);
 	}
 
+	s->speed  = 0.0;
 	free(args);
+
 
 	return NULL;
 
@@ -1201,6 +1206,11 @@ static void ffmpeg_source_destroy(void *data);
 
 void *preprocess_thread(struct ffmpeg_source *s) {
 
+
+	printf("preprocess: waiting 3 secs for prev processes to end...\n");
+	sleep_ms(3*1000);
+
+
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	if (!get_opt_copy()) {
@@ -1232,7 +1242,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 
 	} else {
-		strcpy(ffcmd, "/usr/local/bin/ffmpeg -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -probesize 1000000 -analyzeduration 0 -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
@@ -1263,7 +1273,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		// omit audio select first video stream
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -force_key_frames expr:gte(t,n_forced*0.2) -g 5 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset llhq -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 0 ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.1) -g 5 -r 25 -bf 2 -qp 19 -profile:v main -level 4.0 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 0 -vsync 1 ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
 		// -b:v 2500k -minrate 2500k -maxrate 3500k
 		strcat(ffcmd, "-f mpegts pipe:1");
 
@@ -1341,14 +1351,14 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	
 	mp_media_t *m = &s->media;
 
-	while(s->speed < 0.8) {
-		printf("%s waiting for %f > 0.8...\n", obs_source_get_name(s->source), s->speed);
+	while(s->speed < 0.7) {
+		printf("%s waiting for %f > 0.7...\n", obs_source_get_name(s->source), s->speed);
 
 		sleep_ms(1*1000);
 		if ((time(NULL) - current_time) > 20) {
 			
 			s->gave_up = 1;
-			printf("preprocessing: %s < 0.8 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
+			printf("preprocessing: %s < 0.7 for 20 secs , this is a candidate for restart...\n", s->ffoutput);
 			return;
 		}
 
@@ -1357,6 +1367,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	if (m->log != 1) {
 	
 		printf("%s starting thread...\n", obs_source_get_name(s->source));
+		obs_source_output_video(s->source, NULL);
 		m->log = 1;
 	} else {
 		if ( s->last_frame_at == NULL || ( s->real_last_frame_at != NULL && (current_time - s->real_last_frame_at) > 5) ) {
@@ -1370,7 +1381,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			obs_source_update(s->source, NULL);
 			while (m == NULL || m->initialized == false) {
 				m = &s->media;
-				sleep_ms(1000);
+				sleep_ms(10);
 			}
 
 			m->log = 1;
@@ -1399,9 +1410,6 @@ static void preprocess(struct ffmpeg_source **s_p) {
 		if (waitpid(s->pid, NULL, 0) < 0) {
 			printf("Failed to collect child process\n");
 		}
-
-		printf("preprocess: waiting 3 secs for process to end...\n");
-		sleep_ms(3*1000);
 	}
 
 
@@ -1475,7 +1483,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 
 		}
 
-		strcat(ffinput, "?buffer_size=1000000&fifo_size=1000000&overrun_nonfatal=1&timeout=300000000");
+		strcat(ffinput, "?buffer_size=1000000&fifo_size=1000000&overrun_nonfatal=1&timeout=300000000&reuse=1");
 		s->ffinput = ffinput;
 
 		s->ffoutput =  (char *)obs_data_get_string(settings, "ffoutput");

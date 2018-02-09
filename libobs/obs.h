@@ -1409,7 +1409,8 @@ EXPORT void obs_output_stop(obs_output_t *output);
  * this option will consume extra memory to continually increase delay while
  * waiting to reconnect.
  */
-#define OBS_OUTPUT_DELAY_PRESERVE (1<<0)
+//#define OBS_OUTPUT_DELAY_PRESERVE (1<<0)
+#define OBS_OUTPUT_DELAY_PRESERVE 0
 
 /**
  * Sets the current output delay, in seconds (if the output supports delay).
