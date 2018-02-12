@@ -1282,7 +1282,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		// omit audio select first video stream
 		strcat(ffcmd, "-map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.1) -g 5 -bf 2 -qp 19 -profile:v main -level 4.0 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -bufsize 64k ");// -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 
+		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.2) -g 5 -bf 2 -qp 19 -profile:v main -level 3.1 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra ");//-map 0:1 -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 ");
 		// -b:v 2500k -minrate 2500k -maxrate 3500k
 		strcat(ffcmd, "-f mpegts pipe:1");
 
@@ -1492,9 +1492,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 		int *size = (int*) malloc(sizeof(int));
 		char **data = explode('?', ffinput, &size);
 		if (size == 2) {
-
 			strcpy(ffinput, data[0]);
-
 		}
 
 		strcat(ffinput, "?buffer_size=1000000&fifo_size=1000000&overrun_nonfatal=1&timeout=300000000&reuse=1");
