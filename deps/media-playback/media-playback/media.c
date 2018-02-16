@@ -529,6 +529,9 @@ bool init_avformat(mp_media_t *m)
 {
 	AVInputFormat *format = NULL;
 
+	// if you wanna enable rawvideo
+	//m->format_name = "rawvideo";
+
 	if (m->format_name && *m->format_name) {
 		format = av_find_input_format(m->format_name);
 		if (!format)
@@ -537,40 +540,47 @@ bool init_avformat(mp_media_t *m)
 	}
 
 	AVDictionary *opts = NULL;
-	if (m->buffering && !m->is_local_file)
-		av_dict_set_int(&opts, "buffer_size", m->buffering, 0);
-		
+	//if (m->buffering && !m->is_local_file)
+	//	av_dict_set_int(&opts, "buffer_size", m->buffering, 0);
+	
+	// no buffering
+	av_dict_set_int(&opts, "buffer_size", 0, 0);
+
+	// specify this in case of rawvideo
+	//av_dict_set(&opts, "video_size", "275x154", 0);
+	//av_dict_set(&opts, "pixel_format", "yuv444p", 0);
 
 	m->fmt = avformat_alloc_context();
 	m->fmt->interrupt_callback.callback = interrupt_callback;
 	m->fmt->interrupt_callback.opaque = m;
 
 
-  av_log_set_level(AV_LOG_ERROR);
-  av_log_set_callback(my_log_callback);
+	av_log_set_level(AV_LOG_ERROR);
+	av_log_set_callback(my_log_callback);
 
-  m->fmt->probesize = 50*1000000;
-
+	//probesize, default should be enough
+	// m->fmt->probesize = 50*1000000;
 
 	int ret = avformat_open_input(&m->fmt, m->path, format,
 			opts ? &opts : NULL);
-	av_dict_free(&opts);
 
 	if (ret < 0) {
 		blog(LOG_WARNING, "MP: Failed to open media: '%s'", m->path);
 		return false;
 	}
 
-  m->fmt->max_analyze_duration = 50*1000000;
+	//maxanalyzeduration, default should be enough
+	//m->fmt->max_analyze_duration = 50*1000000;
 
-	if (avformat_find_stream_info(m->fmt, NULL) < 0) {
+	if (avformat_find_stream_info(m->fmt, &opts) < 0) {
 		blog(LOG_WARNING, "MP: Failed to find stream info for '%s'",
 				m->path);
 		return false;
 	}
 
+	av_dict_free(&opts);
   m->has_video = mp_decode_init(m, AVMEDIA_TYPE_VIDEO, m->hw);
-	m->has_audio = mp_decode_init(m, AVMEDIA_TYPE_AUDIO, m->hw);
+	m->has_audio = false;// mp_decode_init(m, AVMEDIA_TYPE_AUDIO, m->hw);
 
 	if (!m->has_video && !m->has_audio) {
 		blog(LOG_WARNING, "MP: Could not initialize audio or video: "

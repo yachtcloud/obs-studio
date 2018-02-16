@@ -94,6 +94,7 @@ static bool nvenc_init_codec(struct nvenc_encoder *enc)
 	av_dict_set( &av_dict_opts, "force_key_frames", "expr:gte(t,n_forced*0.5)", 0);
 	av_dict_set( &av_dict_opts, "g", "13", 0);
 	av_dict_set( &av_dict_opts, "bufsize", "0", 0);
+	av_dict_set( &av_dict_opts, "zerolatency", "1", 1);
 
 	ret = avcodec_open2(enc->context, enc->nvenc, &av_dict_opts);
 	if (ret < 0) {

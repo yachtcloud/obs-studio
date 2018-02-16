@@ -73,6 +73,22 @@ static int mp_open_codec(struct mp_decode *d)
 	    c->codec_id != AV_CODEC_ID_WEBP)
 		c->thread_count = 0;
 
+
+	//c->pix_fmt = AV_PIX_FMT_NV12;
+	//c->pix_fmt = AV_PIX_FMT_NV20;
+	//c->pix_fmt = AV_PIX_FMT_RGB24;
+	//c->pix_fmt = AV_PIX_FMT_YUV444P;
+	//c->codec_id = AV_CODEC_ID_RAWVIDEO;
+
+	//c->codec_type = 1;
+	//c->time_base.num = 1;
+	//c->time_base.den = 25;
+	//c->pix_fmt = AV_PIX_FMT_YUV420P;
+	//c->width = 275;
+	//c->height = 114;
+
+	printf("codec: %s, max_b_frames: %d, pix_fmt: %d, width: %d, height: %d, gop_size: %d, bit_rate: %d, time_base.num: %d, time_base.den: %d, codec_type: %d\n", d->codec->name, c->max_b_frames, c->pix_fmt, c->width, c->height, c->gop_size, c->bit_rate, c->time_base.num, c->time_base.den, c->codec_type);
+
 	AVDictionary * av_dict_opts = NULL;
 
 
@@ -80,15 +96,14 @@ static int mp_open_codec(struct mp_decode *d)
 	//av_dict_set( &av_dict_opts, "hwaccel", "cuvid", 0);
 	//av_dict_set( &av_dict_opts, "gpu", "0", 0);
 
-	//av_dict_set( &av_dict_opts, "deint", "0", 0);
-	//av_dict_set( &av_dict_opts, "drop_second_field", "1", 0);
-	//av_dict_set( &av_dict_opts, "surfaces", "16", 0 );
-	//
-	//av_dict_set( &av_dict_opts, "bufsize", "1000000", 0 );
+	//av_dict_set( &av_dict_opts, "deint", "2", 0);
+	//av_dict_set( &av_dict_opts, "drop_second_field", "0", 0);
+	//av_dict_set( &av_dict_opts, "surfaces", "8", 0 );
+	//av_dict_set( &av_dict_opts, "preset", "ultrafast", 0 );
+	//av_dict_set( &av_dict_opts, "tune", "zerolatency", 0 );
+	//av_dict_set( &av_dict_opts, "delay", "50", 0 );
 
-
-
-	ret = avcodec_open2(c, d->codec, &av_dict_opts);
+	ret = avcodec_open2(c, d->codec, NULL); //&av_dict_opts);
 	if (ret < 0)
 		goto fail;
 
@@ -116,7 +131,16 @@ bool mp_decode_init(mp_media_t *m, enum AVMediaType type, bool hw)
 	d->m = m;
 	d->audio = type == AVMEDIA_TYPE_AUDIO;
 
+	// disable audio
+	if (type == AVMEDIA_TYPE_AUDIO)
+		return false;
+
+	// enable in case of rawvideo
+	//AVCodec *my = avcodec_find_decoder_by_name("rawvideo");
+	//ret = av_find_best_stream(m->fmt, type, 0, -1, &my, 0);
+	
 	ret = av_find_best_stream(m->fmt, type, -1, -1, NULL, 0);
+	printf("find_best_stream: %d\n", ret);
 	if (ret < 0)
 		return false;
 	stream = d->stream = m->fmt->streams[ret];
@@ -141,6 +165,8 @@ bool mp_decode_init(mp_media_t *m, enum AVMediaType type, bool hw)
 			d->codec = avcodec_find_decoder_by_name("libvpx");
 		else if (id == AV_CODEC_ID_VP9)
 			d->codec = avcodec_find_decoder_by_name("libvpx-vp9");
+		else if (id == AV_CODEC_ID_RAWVIDEO)
+			d->codec = avcodec_find_decoder_by_name("rawvideo");
 
 		if (!d->codec)
 			d->codec = avcodec_find_decoder(id);
@@ -206,6 +232,7 @@ int init_filters(mp_media_t *m, const char *filters_descr, AVStream *s)
       printf("Cannot create buffer source %d, args=\"%s\"\n", ret, args);
       return ret;
   }
+
 
   /* buffer video sink: to terminate the filter chain. */
   buffersink_params = av_buffersink_params_alloc();

@@ -14,6 +14,7 @@
  * OR IN CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE.
  */
 
+#define _GNU_SOURCE
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -25,12 +26,12 @@
 #include <obs-module.h>
 #include <util/platform.h>
 #include <util/dstr.h>
-#include <regex.h>  
+#include <regex.h>
 
 #include <limits.h>
 #include <string.h>
 #include <stdlib.h>
-#include <unistd.h> 
+#include <unistd.h>
 #include <signal.h>
 
 
@@ -70,27 +71,28 @@ struct ffmpeg_source {
 	bool media_valid;
 	bool destroy_media;
 
-  // rescue
-  double source_frames;
-  unsigned long last_frame_at;
-  unsigned long real_last_frame_at;
-  unsigned long last_25_fps;
-  unsigned long started_at;
-  bool restarted;
+	// rescue
+	double source_frames;
+	unsigned long last_frame_at;
+	unsigned long real_last_frame_at;
+	unsigned long last_25_fps;
+	unsigned long started_at;
+	bool restarted;
 
-  // preprocess
-  int restart_status;
-  pthread_t *tid;
-  pid_t pid;
- FILE *fp;
-  char **rescale;
-  char **codecs;
-  char *scene_name;
-  char *ffinput;
-  char *ffoutput;
-  int i;
-  float speed;
-  int gave_up;
+	// preprocess
+	int restart_status;
+	pthread_t *tid;
+	pid_t pid;
+	FILE *fp;
+	char **rescale;
+	char **codecs;
+	char *scene_name;
+	char *ffinput;
+	char *ffoutput;
+	int i;
+	int port;
+	float speed;
+	int gave_up;
 
 	struct SwsContext *sws_ctx;
 	int sws_width;
@@ -117,7 +119,7 @@ struct ffmpeg_source {
 
 void sleep_ms(int milliseconds) {
 	struct timespec ts;
-	ts.tv_sec = milliseconds / 1000;	
+	ts.tv_sec = milliseconds / 1000;
 	ts.tv_nsec = (milliseconds % 1000) * 1000000;
 	nanosleep(&ts, NULL);
 }
@@ -162,11 +164,11 @@ static void ffmpeg_source_defaults(obs_data_t *settings)
 }
 
 static const char *media_filter =
-	" (*.mp4 *.ts *.mov *.flv *.mkv *.avi *.mp3 *.ogg *.aac *.wav *.gif *.webm);;";
+" (*.mp4 *.ts *.mov *.flv *.mkv *.avi *.mp3 *.ogg *.aac *.wav *.gif *.webm);;";
 static const char *video_filter =
-	" (*.mp4 *.ts *.mov *.flv *.mkv *.avi *.gif *.webm);;";
+" (*.mp4 *.ts *.mov *.flv *.mkv *.avi *.gif *.webm);;";
 static const char *audio_filter =
-	" (*.mp3 *.aac *.ogg *.wav);;";
+" (*.mp3 *.aac *.ogg *.wav);;";
 
 static obs_properties_t *ffmpeg_source_getproperties(void *data)
 {
@@ -300,8 +302,8 @@ static void source_restart (void *data, bool debug);
 static void media_stopped(void *opaque)
 {
 	struct ffmpeg_source *s = opaque;
-  source_restart(s, false);
-    return;
+	source_restart(s, false);
+	return;
 	if (s->is_clear_on_media_end) {
 		obs_source_output_video(s->source, NULL);
 		if (s->close_when_inactive && s->media_valid)
@@ -325,97 +327,97 @@ static void ffmpeg_source_open(struct ffmpeg_source *s)
 
 static bool rescue (void *data, bool debug)
 {
-  struct ffmpeg_source *c = data;
-  double source_frames = obs_source_get_total_frames(c->source);
-  double diff;
-  time_t current_time = time(NULL);
-  struct tm * time_info = NULL;
-  char timeString[9];
-  bool attempting_restart;
+	struct ffmpeg_source *c = data;
+	double source_frames = obs_source_get_total_frames(c->source);
+	double diff;
+	time_t current_time = time(NULL);
+	struct tm * time_info = NULL;
+	char timeString[9];
+	bool attempting_restart;
 
 
-  //printf("speed: %f\n", c->speed);
+	//printf("speed: %f\n", c->speed);
 
-  if ( c->source_frames != 0 ) {
+	if ( c->source_frames != 0 ) {
 
-    diff = (double) source_frames - c->source_frames;
+		diff = (double) source_frames - c->source_frames;
 
-    if ( diff > 0 && c->last_frame_at != current_time ) {
-      if (c->restarted == true) {
-	    	printf("rescue: resuming to normal state after restart\n");
-		c->started_at = time(NULL);
-		c->last_25_fps = time(NULL);
-      }
-      c->real_last_frame_at = current_time;
-      c->last_frame_at = current_time;
-      c->restarted = false;
-      c->restart_status = -1;
-      if (c->source->video_fps >= 24.0) {
-	c->last_25_fps = time(NULL);
-      } else {
-	      printf("%s: %f fps\n", obs_source_get_name(c->source), c->source->video_fps);
-      }
+		if ( diff > 0 && c->last_frame_at != current_time ) {
+			if (c->restarted == true) {
+				printf("rescue: resuming to normal state after restart\n");
+				c->started_at = time(NULL);
+				c->last_25_fps = time(NULL);
+			}
+			c->real_last_frame_at = current_time;
+			c->last_frame_at = current_time;
+			c->restarted = false;
+			c->restart_status = -1;
+			if (c->source->video_fps >= 24.0) {
+				c->last_25_fps = time(NULL);
+			} else {
+				printf("%s: %f fps\n", obs_source_get_name(c->source), c->source->video_fps);
+			}
 
-      if ( debug ) {
-        time_info = localtime((time_t) &current_time);
-        strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
-        printf("last_frame_at: %s, id: %s\n", timeString, obs_source_get_name(c->source));
-      }
+			if ( debug ) {
+				time_info = localtime((time_t) &current_time);
+				strftime(timeString, sizeof(timeString), "%H:%M:%S", time_info);
+				printf("last_frame_at: %s, id: %s\n", timeString, obs_source_get_name(c->source));
+			}
 
-    }
-    
-    if ( diff < 0 ) {
-      printf("%s skipped to the past!\n", obs_source_get_name(c->source));
+		}
 
-      source_restart(c, debug);
-    }
+		if ( diff < 0 ) {
+			printf("%s skipped to the past!\n", obs_source_get_name(c->source));
+
+			source_restart(c, debug);
+		}
 
 
-    // more than 10 secs without a frame; or fps below 25 for more than 2 secs
-    if ( ( c->last_frame_at != NULL &&  
-			    ((current_time - c->last_frame_at) > 10 ) ) || 
-			   (c->last_25_fps != NULL && (c->source->video_fps < 10.0) && (current_time - c->last_25_fps) > 30 && (current_time - c->started_at) > 60 ) ||
-		( c->speed < 0.95 && (current_time - c->started_at) > 120 ) 
-		    ) {
-      printf("%s 10 seconds without new frames OR fps below 10 for more than 30 secs OR ffmpeg speed < 0.7! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
+		// more than 10 secs without a frame; or fps below 25 for more than 2 secs
+		if ( ( c->last_frame_at != NULL &&
+					((current_time - c->last_frame_at) > 10 ) ) ||
+				(c->last_25_fps != NULL && (c->source->video_fps < 10.0) && (current_time - c->last_25_fps) > 30 && (current_time - c->started_at) > 60 ) ||
+				( c->speed < 0.95 && (current_time - c->started_at) > 120 )
+		   ) {
+			printf("%s 10 seconds without new frames OR fps below 10 for more than 30 secs OR ffmpeg speed < 0.7! fps: %f, last 25 fps before %d secs, speed %f\n", obs_source_get_name(c->source), c->source->video_fps, (current_time - c->last_25_fps), c->speed);
 
-      source_restart(c, debug);
+			source_restart(c, debug);
 
-      // restart the counter so that the log message will appear again in the next 10 seconds
-      c->last_frame_at = current_time;
-	//c->last_25_fps = time(NULL);
-	c->started_at = time(NULL);
-    }
-  } else {
-	  if (c->started_at == 0) 
-	c->started_at = time(NULL);
-	  if (current_time - c->started_at > 5) {
-	  printf("%s starting... \n",  obs_source_get_name(c->source));
-	c->started_at = time(NULL);
-	  }
+			// restart the counter so that the log message will appear again in the next 10 seconds
+			c->last_frame_at = current_time;
+			//c->last_25_fps = time(NULL);
+			c->started_at = time(NULL);
+		}
+	} else {
+		if (c->started_at == 0)
+			c->started_at = time(NULL);
+		if (current_time - c->started_at > 5) {
+			printf("%s starting... \n",  obs_source_get_name(c->source));
+			c->started_at = time(NULL);
+		}
 
-	if (c->gave_up == 1) {
-		source_restart(c, debug);
+		if (c->gave_up == 1) {
+			source_restart(c, debug);
 
+		}
 	}
-  }
 
-  if (time_info != NULL)
-    free(time_info);
+	if (time_info != NULL)
+		free(time_info);
 
-  // update source_frames
-  c->source_frames = source_frames;
+	// update source_frames
+	c->source_frames = source_frames;
 
-  switch ( attempting_restart ) {
-    case true:
-      // stop 
-      return false;
-    
-    default:
-    case false:
-      // proceed
-      return true;
-  }
+	switch ( attempting_restart ) {
+		case true:
+			// stop
+			return false;
+
+		default:
+		case false:
+			// proceed
+			return true;
+	}
 
 }
 
@@ -425,43 +427,43 @@ static void preprocess(struct ffmpeg_source **s_p);
 static void source_restart (void *data, bool debug)
 {
 
-  struct ffmpeg_source *c = data;
-  c->restart_status++;
-  
-  bool opt_preprocess = get_opt_preprocess();
-  // at start and each 60 secs
-  if (opt_preprocess) {
-    if (c->restart_status == 0 || c->restart_status%5 == 0) {
-    if ( debug )
-      printf("%s restarting...\n", obs_source_get_name(c->source));
+	struct ffmpeg_source *c = data;
+	c->restart_status++;
 
-	    c->restarted = true;
-	    preprocess(&c);
-	    return true;
-    } else {
-    	if ( debug )
-      		printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
- 
-	return false;
-    }
-  }
+	bool opt_preprocess = get_opt_preprocess();
+	// at start and each 60 secs
+	if (opt_preprocess) {
+		if (c->restart_status == 0 || c->restart_status%5 == 0) {
+			if ( debug )
+				printf("%s restarting...\n", obs_source_get_name(c->source));
 
-  // 30 secs
-  if ( (!opt_preprocess && c->restart_status == 0) ) {
-    if ( debug )
-      printf("%s restarting...\n", obs_source_get_name(c->source));
-    c->restarted = true;
-    
-    obs_source_output_video(c->source, NULL);
-    obs_source_update(c->source, NULL);
+			c->restarted = true;
+			preprocess(&c);
+			return true;
+		} else {
+			if ( debug )
+				printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
 
-    return true;
-  } else {
-    if ( debug )
-      printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
-    
-    return false;
-  }
+			return false;
+		}
+	}
+
+	// 30 secs
+	if ( (!opt_preprocess && c->restart_status == 0) ) {
+		if ( debug )
+			printf("%s restarting...\n", obs_source_get_name(c->source));
+		c->restarted = true;
+
+		obs_source_output_video(c->source, NULL);
+		obs_source_update(c->source, NULL);
+
+		return true;
+	} else {
+		if ( debug )
+			printf("%s already restarted, nothing to do\n", obs_source_get_name(c->source));
+
+		return false;
+	}
 }
 
 
@@ -470,8 +472,8 @@ static void ffmpeg_source_tick(void *data, float seconds)
 	UNUSED_PARAMETER(seconds);
 
 	struct ffmpeg_source *s = data;
-  if ( !rescue(data, false) ) 
-    return;
+	if ( !rescue(data, false) )
+		return;
 
 	if (s->destroy_media) {
 		if (s->media_valid) {
@@ -484,6 +486,8 @@ static void ffmpeg_source_tick(void *data, float seconds)
 
 static void ffmpeg_source_start(struct ffmpeg_source *s)
 {
+	printf("START!!\n");
+
 	if (!s->media_valid)
 		ffmpeg_source_open(s);
 
@@ -494,8 +498,67 @@ static void ffmpeg_source_start(struct ffmpeg_source *s)
 	}
 }
 
+static void ffmpeg_source_update2(void *data, obs_data_t *settings)
+{
+
+	printf("UPDATE2\n");
+	struct ffmpeg_source *s = data;
+
+	bool is_local_file = obs_data_get_bool(settings, "is_local_file");
+
+	char *input;
+	char *input_format;
+
+	bfree(s->input);
+	bfree(s->input_format);
+
+	if (is_local_file) {
+		input = (char *)obs_data_get_string(settings, "local_file");
+		input_format = NULL;
+		s->is_looping = obs_data_get_bool(settings, "looping");
+		s->close_when_inactive = obs_data_get_bool(settings,
+				"close_when_inactive");
+
+	} else {
+		input = (char *)obs_data_get_string(settings, "input");
+		input_format = (char *)obs_data_get_string(settings,
+				"input_format");
+		s->is_looping = false;
+
+		s->close_when_inactive = true;
+
+	}
+
+	s->input = input ? bstrdup(input) : NULL;
+	s->input_format = input_format ? bstrdup(input_format) : NULL;
+#ifndef __APPLE__
+	s->is_hw_decoding = obs_data_get_bool(settings, "hw_decode");
+#endif
+	s->is_clear_on_media_end = obs_data_get_bool(settings,
+			"clear_on_media_end");
+	s->restart_on_activate = obs_data_get_bool(settings,
+			"restart_on_activate");
+	s->range = (enum video_range_type)obs_data_get_int(settings,
+			"color_range");
+	s->buffering_mb = (int)obs_data_get_int(settings, "buffering_mb");
+	s->is_local_file = is_local_file;
+	s->seekable = obs_data_get_bool(settings, "seekable");
+
+	if (s->media_valid) {
+		//mp_media_free(&s->media);
+		s->media_valid = false;
+	}
+
+
+}
+
+
+
+
 static void ffmpeg_source_update(void *data, obs_data_t *settings)
 {
+
+	printf("UPDATE\n");
 	struct ffmpeg_source *s = data;
 
 	bool is_local_file = obs_data_get_bool(settings, "is_local_file");
@@ -630,93 +693,70 @@ static void get_nb_frames(void *data, calldata_t *cd)
 
 int split (const char *str, char c, char ***arr)
 {
-    int count = 1;
-    int token_len = 1;
-    int i = 0;
-    char *p;
-    char *t;
+	int count = 1;
+	int token_len = 1;
+	int i = 0;
+	char *p;
+	char *t;
 
-    p = str;
-    while (*p != '\0')
-    {
-        if (*p == c)
-            count++;
-        p++;
-    }
-
-    *arr = (char**) malloc(sizeof(char*) * count);
-    if (*arr == NULL)
-        exit(1);
-
-    p = str;
-    while (*p != '\0')
-    {
-        if (*p == c)
-        {
-            (*arr)[i] = (char*) malloc( sizeof(char) * token_len );
-            if ((*arr)[i] == NULL)
-                exit(1);
-
-            token_len = 0;
-            i++;
-        }
-        p++;
-        token_len++;
-    }
-    (*arr)[i] = (char*) malloc( sizeof(char) * token_len );
-    if ((*arr)[i] == NULL)
-        exit(1);
-
-    i = 0;
-    p = str;
-    t = ((*arr)[i]);
-    while (*p != '\0')
-    {
-        if (*p != c && *p != '\0')
-        {
-            *t = *p;
-            t++;
-        }
-        else
-        {
-            *t = '\0';
-            i++;
-            t = ((*arr)[i]);
-        }
-        p++;
-    }
-
-    return count;
-}
-
-
-char** explode(char delimiter, char* str, int **size) {
-	int l = strlen(str), i=0, j=0, k=0;
-	char x = NULL;
-	char** r = (char**)realloc(r, sizeof(char**));
-	r[0] = (char*)malloc(l*sizeof(char));
-	while (i<l+1) {
-		x = str[i++];
-		if (x==delimiter || x=='\0') {
-			r[j][k] = '\0';
-			r[j] = (char*)realloc(r[j], k*sizeof(char));
-			k = 0;
-			r = (char**)realloc(r, (++j+1)*sizeof(char**));
-
-			r[j] = (char*)malloc(l*sizeof(char));
-		} else {
-			r[j][k++] = x;
-		}
+	p = str;
+	while (*p != '\0')
+	{
+		if (*p == c)
+			count++;
+		p++;
 	}
-	*size = j;
-	return r;
+
+	*arr = (char**) malloc(sizeof(char*) * count);
+	if (*arr == NULL)
+		exit(1);
+
+	p = str;
+	while (*p != '\0')
+	{
+		if (*p == c)
+		{
+			(*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+			if ((*arr)[i] == NULL)
+				exit(1);
+
+			token_len = 0;
+			i++;
+		}
+		p++;
+		token_len++;
+	}
+	(*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+	if ((*arr)[i] == NULL)
+		exit(1);
+
+	i = 0;
+	p = str;
+	t = ((*arr)[i]);
+	while (*p != '\0')
+	{
+		if (*p != c && *p != '\0')
+		{
+			*t = *p;
+			t++;
+		}
+		else
+		{
+			*t = '\0';
+			i++;
+			t = ((*arr)[i]);
+		}
+		p++;
+	}
+
+	return count;
 }
 
 
 struct arg_struct {
-    struct ffmpeg_source *s; 
-    int p_stderr;
-    
+	struct ffmpeg_source *s;
+	int p_stderr;
+
 };
 
 
@@ -729,41 +769,41 @@ char * trim(char * s) {
 
 	memmove(s, p, l + 1);
 	return s;
-}   
+}
 
 
 
 void str_replace(char *target, const char *needle, const char *replacement)
 {
-    char buffer[1024] = { 0 };
-    char *insert_point = &buffer[0];
-    const char *tmp = target;
-    size_t needle_len = strlen(needle);
-    size_t repl_len = strlen(replacement);
+	char buffer[1024] = { 0 };
+	char *insert_point = &buffer[0];
+	const char *tmp = target;
+	size_t needle_len = strlen(needle);
+	size_t repl_len = strlen(replacement);
 
-    while (1) {
-        const char *p = strstr(tmp, needle);
+	while (1) {
+		const char *p = strstr(tmp, needle);
 
-        // walked past last occurrence of needle; copy remaining part
-        if (p == NULL) {
-            strcpy(insert_point, tmp);
-            break;
-        }
+		// walked past last occurrence of needle; copy remaining part
+		if (p == NULL) {
+			strcpy(insert_point, tmp);
+			break;
+		}
 
-        // copy part before needle
-        memcpy(insert_point, tmp, p - tmp);
-        insert_point += p - tmp;
+		// copy part before needle
+		memcpy(insert_point, tmp, p - tmp);
+		insert_point += p - tmp;
 
-        // copy replacement string
-        memcpy(insert_point, replacement, repl_len);
-        insert_point += repl_len;
+		// copy replacement string
+		memcpy(insert_point, replacement, repl_len);
+		insert_point += repl_len;
 
-        // adjust pointers, move on
-        tmp = p + needle_len;
-    }
+		// adjust pointers, move on
+		tmp = p + needle_len;
+	}
 
-    // write altered string back to target
-    strcpy(target, buffer);
+	// write altered string back to target
+	strcpy(target, buffer);
 }
 
 
@@ -772,10 +812,10 @@ void parse_stderr_thread(void *arguments) {
 
 	struct arg_struct *args = (struct arg_struct *)arguments;
 
-	struct ffmpeg_source *s = args->s; 
-    	int p_stderr = args->p_stderr;
+	struct ffmpeg_source *s = args->s;
+	int p_stderr = args->p_stderr;
 
-        char buffer[140];
+	char buffer[140];
 
 	// wait for ffmpeg to start
 	sleep_ms(1*1000);
@@ -791,40 +831,40 @@ void parse_stderr_thread(void *arguments) {
 		/* Compile regular expression */
 		reti = regcomp(&regex, "speed=\w*([0-9]+\\.[0-9]+)?", REG_EXTENDED);
 		if (reti) {
-			    printf("Could not compile regex\n");
-			    continue;
+			printf("Could not compile regex\n");
+			continue;
 		}
 
-		   regmatch_t pmatch[10];
+		regmatch_t pmatch[10];
 
-		   int len;
-		   char result[100];
+		int len;
+		char result[100];
 
 		/* Execute regular expression */
 		reti = regexec(&regex, buffer, 10, pmatch, REG_NOTBOL);
 		if (!reti) {
 
 			for (int i = 0; pmatch[i].rm_so != -1; i++)
-			   {
-			      len = pmatch[i].rm_eo - pmatch[i].rm_so;
-			      memcpy(result, buffer + pmatch[i].rm_so, len);
-			      result[len] = '\0';
+			{
+				len = pmatch[i].rm_eo - pmatch[i].rm_so;
+				memcpy(result, buffer + pmatch[i].rm_so, len);
+				result[len] = '\0';
 
 				if (i==1) {
 					str_replace(result, ".", ",");
 					s->speed = (float) atof(result);
 					if (s->speed < 0.95) {
 						printf("%s: warning speed %f\n", obs_source_get_name(s->source), s->speed);
-						
+
 					}
 				}
-			   }
+			}
 		}
 		else if (reti == REG_NOMATCH) {
 		}
 		else {
-			    regerror(reti, &regex, msgbuf, sizeof(msgbuf));
-			    printf("Regex match failed: %s\n", msgbuf);
+			regerror(reti, &regex, msgbuf, sizeof(msgbuf));
+			printf("Regex match failed: %s\n", msgbuf);
 		}
 
 		/* Free memory allocated to the pattern buffer by regcomp() */
@@ -842,87 +882,95 @@ void parse_stderr_thread(void *arguments) {
 #define READ 0
 #define WRITE 1
 
-pid_t
+	pid_t
 popen2(struct ffmpeg_source *s, const char *command, int *infp, int *outfp, char *fifo)
 {
-    int p_stdin[2], p_stdout[2], p_stderr[2];
-    pid_t pid;
+	int p_stdin[2], p_stdout[2], p_stderr[2];
+	pid_t pid;
 
-    if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0 || pipe(p_stderr))
-        return -1;
-
-
-    printf("forking %s\n", fifo);
-
-    pid = fork();
-
-    if (pid < 0)
-        return pid;
-    else if (pid == 0)
-    {
-
-    int fd = open(fifo, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
-
-    dup2(fd, 1);   // make stdout go to file
-    
-    close(p_stderr[0]);
-    dup2(p_stderr[1], 2);
-
-    //dup2(p, 2);   // make stderr go to file - you may choose to not do this
-                   // or perhaps send stderr to another file
-
-    close(fd);     // fd no longer needed - the dup'ed handles are sufficient
-
-				int pid = getpid();
-                                FILE *f = fopen("/tmp/obs/pid.txt", "a");
-                                if (f == NULL)
-                                {           
-                                        printf("Error opening file!\n");
-                                }
-                                fprintf(f, "%d ", pid);
-                                fclose(f);
+	if (pipe(p_stdin) != 0 || pipe(p_stdout) != 0 || pipe(p_stderr))
+		return -1;
 
 
+	//fcntl(p_stderr[1], F_SETPIPE_SZ, sizeof(size_t));
+	//fcntl(p_stdin[1], F_SETPIPE_SZ, sizeof(size_t));
+	//fcntl(p_stdout[1], F_SETPIPE_SZ, sizeof(size_t));
 
-	char **brk = NULL;
-	int size = split(command, ' ', &brk);
+	printf("forking %s\n", fifo);
 
-	brk[size] = (char *) NULL;
+	pid = fork();
 
-        //can change to any exec* function family.
-        //execl(brk, NULL);
-	execv("/usr/local/bin/ffmpeg", brk);
-        perror("execl");
-        exit(1);
-    }
+	if (pid < 0)
+		return pid;
+	else if (pid == 0)
+	{
+
+		//int fd = open(fifo, O_RDWR | O_CREAT, S_IRUSR | S_IWUSR);
+
+		//fcntl(fd, F_SETPIPE_SZ, sizeof(size_t));
+
+		//dup2(fd, 1);   // make stdout go to file
+
+		close(p_stderr[0]);
+		dup2(p_stderr[1], 2);
+
+		//dup2(p, 2);   // make stderr go to file - you may choose to not do this
+		// or perhaps send stderr to another file
+
+		//close(fd);     // fd no longer needed - the dup'ed handles are sufficient
+
+		int pid = getpid();
+		FILE *f = fopen("/tmp/obs/pid.txt", "a");
+		if (f == NULL)
+		{
+			printf("Error opening file!\n");
+		} else {
+			if (pid)
+				fprintf(f, "%d ", pid);
+			fclose(f);
+		}
+
+
+
+		char **brk = NULL;
+		int size = split(command, ' ', &brk);
+
+		brk[size] = (char *) NULL;
+
+		//can change to any exec* function family.
+		//execl(brk, NULL);
+		execv("/usr/local/bin/ffmpeg", brk);
+		perror("execl");
+		exit(1);
+	}
 
 
 	close(p_stderr[1]);  // close the write end of the pipe in the parent
-	
 
-    struct arg_struct *args = malloc(sizeof(struct arg_struct));
-    args->s =  s;
-    args->p_stderr =  p_stderr[0];
 
-pthread_t tid;
+	struct arg_struct *args = malloc(sizeof(struct arg_struct));
+	args->s =  s;
+	args->p_stderr =  p_stderr[0];
+
+	pthread_t tid;
 	int err = pthread_create(&tid, NULL, &parse_stderr_thread,(void *)args);
 
-        
-    // close unused descriptors on parent process.
-    close(p_stdin[READ]);
-    close(p_stdout[WRITE]);
 
-    if (infp == NULL)
-        close(p_stdin[WRITE]);
-    else
-        *infp = p_stdin[WRITE];
+	// close unused descriptors on parent process.
+	close(p_stdin[READ]);
+	close(p_stdout[WRITE]);
 
-    if (outfp == NULL)
-        close(p_stdout[READ]);
-    else
-        *outfp = p_stdout[READ];
+	if (infp == NULL)
+		close(p_stdin[WRITE]);
+	else
+		*infp = p_stdin[WRITE];
 
-    return pid;
+	if (outfp == NULL)
+		close(p_stdout[READ]);
+	else
+		*outfp = p_stdout[READ];
+
+	return pid;
 }
 
 static pid_t run_sync_forever2(struct ffmpeg_source *s, char *cmd, char *fifo) {
@@ -935,7 +983,7 @@ static pid_t run_sync_forever2(struct ffmpeg_source *s, char *cmd, char *fifo) {
 }
 
 static char *run_sync_forever(char *cmd) {
-	
+
 	printf("run sync forever: executing '%s'\n", cmd);
 
 
@@ -970,7 +1018,7 @@ static char *run_sync(char *cmd) {
 	int max = 1000;
 	char *out = (char*) malloc(max*sizeof(char));
 	strcpy(out, "");
-	
+
 	char path[1035];
 	int i = 0;
 	while (fgets(path, sizeof(path)-1, fp) != NULL) {
@@ -984,8 +1032,8 @@ static char *run_sync(char *cmd) {
 }
 int file_exists (char *filename)
 {
-  struct stat   buffer;   
-  return (stat (filename, &buffer) == 0);
+	struct stat   buffer;
+	return (stat (filename, &buffer) == 0);
 }
 
 
@@ -1007,7 +1055,7 @@ static char ** probe(char *input, int reprobe, char timeout[]) {
 	strcat(cache_path, input_hash);
 
 
-	char *cache_data = (char *) malloc(1000*sizeof(char));
+	char *cache_data = (char *) malloc(1002*sizeof(char));
 
 	if( file_exists( cache_path ) ) {
 		// if exists
@@ -1017,14 +1065,14 @@ static char ** probe(char *input, int reprobe, char timeout[]) {
 		FILE *file;
 		file = fopen(cache_path, "r");
 		if (file) {
-	    	    fread (cache_data, 1, 1000, file);
-		    fclose(file);
+			fread (cache_data, 1, 1000, file);
+			fclose(file);
 		}
 		cmdres = cache_data;
 	} else {
 
 		cache_data = NULL;
-	} 
+	}
 
 
 
@@ -1036,22 +1084,24 @@ static char ** probe(char *input, int reprobe, char timeout[]) {
 	strcat(cmd, input);
 	strcat(cmd, "\" | head -4 2>/dev/null");
 
-	
+
 	if (reprobe == 1 || cache_data == NULL) {
 		cmdres = trim(run_sync(cmd));
 	}
 
-	int *size = (int*) malloc(sizeof(int));
-	char **data = explode('\n', cmdres, &size);
+
+	char **data = NULL;
+	int size = split(cmdres, '\n', &data);
+
 	if (size == 4) {
 
-		    FILE *fp = fopen(cache_path, "w");
-		    if (fp != NULL)
-		    {
-			
+		FILE *fp = fopen(cache_path, "w");
+		if (fp != NULL)
+		{
+
 			fprintf(fp, "%s", cmdres);
 			fclose(fp);
-		    }
+		}
 
 
 		printf("probe: got codec %s, %sx%s, index %s\n", data[1], data[2], data[3], data[0]);
@@ -1100,9 +1150,12 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 		free(rescalecmd);
 		return NULL;
 	}
+	printf("%s\n", out);
 
-	int *size = (int*)malloc(sizeof(int));
-	char **resize_to = explode(':', out, &size);
+
+	char **resize_to = NULL;
+	int size = split(out, ':', &resize_to);
+
 
 	if (size != 2) {
 		printf("get rescale size: incorrect format '%s'\n", out);
@@ -1127,9 +1180,15 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 		return NULL;
 	}
 
+
+	printf("%d*%d / %d\n", r_width, s_height, s_width);
+
 	// proportional resize
 	int p_width = r_width;
 	int p_height = (int) ((r_width*s_height)/s_width);
+
+
+
 
 	char** r = (char**)malloc(sizeof(char**));
 	r[0] = (char*)malloc(50*sizeof(char));
@@ -1144,7 +1203,7 @@ char** get_rescale_size(char *scene_name, char *ffinput, int s_width, int s_heig
 }
 
 char **can_preprocess(char *input, int reprobe, char timeout[]) {
-	
+
 	char **codecs = probe(input, reprobe, timeout);
 
 	if (codecs == NULL) {
@@ -1152,53 +1211,53 @@ char **can_preprocess(char *input, int reprobe, char timeout[]) {
 		return NULL;
 	}
 
-	if (strcmp(codecs[1],"h264") == 0 || strcmp(codecs[1],"mpeg2video") == 0) {
+	if (strcmp(codecs[1],"h264") == 0 || strcmp(codecs[1],"mpeg2video") == 0 || strcmp(codecs[1],"hevc") == 0) {
 		return codecs;
 	} else {
 		printf("preprocessing failed: codec %s not supported\n", codecs[1]);
 		return NULL;
 	}
 }
-	
+
 
 static void preprocess_exec(char *cmd) {
 
-        printf("preprocess_exec: '%s'\n", cmd);
+	printf("preprocess_exec: '%s'\n", cmd);
 
-        FILE *fp = popen(cmd, "r");
-        if (fp == NULL) {
-                printf("sync: failed to run command\n" );
-                return;
-        }
+	FILE *fp = popen(cmd, "r");
+	if (fp == NULL) {
+		printf("sync: failed to run command\n" );
+		return;
+	}
 
-        char temp[1035];
-        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
-                printf("%s\n", temp);
-        }
+	char temp[1035];
+	while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+		printf("%s\n", temp);
+	}
 
-        pclose(fp);
+	pclose(fp);
 }
 
 
 
 static void recreateFIFOAndsyncFS(char *fifo) {
 
-        char *cmdrm = (char*) malloc(100*sizeof(char));
-        strcpy(cmdrm, "rm -f ");
+	char *cmdrm = (char*) malloc(100*sizeof(char));
+	strcpy(cmdrm, "rm -f ");
 	strcat(cmdrm, fifo);
 	preprocess_exec(cmdrm);
 
 
-        char *cmdmk = (char*) malloc(100*sizeof(char));
-        strcpy(cmdmk, "mkfifo ");
+	char *cmdmk = (char*) malloc(100*sizeof(char));
+	strcpy(cmdmk, "mkfifo ");
 	strcat(cmdmk, fifo);
 	preprocess_exec(cmdmk);
 
 	// alternative
 	//mkfifo(fifo, 0666);
 
-        char *cmdsync = (char*) malloc(100*sizeof(char));
-        strcpy(cmdsync, "sync");
+	char *cmdsync = (char*) malloc(100*sizeof(char));
+	strcpy(cmdsync, "sync");
 	preprocess_exec(cmdsync);
 
 	free(cmdrm);
@@ -1210,11 +1269,6 @@ static void recreateFIFOAndsyncFS(char *fifo) {
 static void ffmpeg_source_destroy(void *data);
 
 void *preprocess_thread(struct ffmpeg_source *s) {
-
-	if (0 && preprocess_stream < s->i)
-		while  (preprocess_stream != s->i) {
-			sleep_ms(10);
-		}
 
 	//printf("preprocess: waiting 3 secs for prev processes to end...\n");
 	//sleep_ms(3*1000);
@@ -1251,17 +1305,17 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 
 	} else {
-		strcpy(ffcmd, "/usr/local/bin/ffmpeg -rtbufsize 100M -err_detect ignore_err -fflags +genpts -hwaccel_device 0 -hwaccel cuvid -c:v ");
+		strcpy(ffcmd, "/usr/local/bin/ffmpeg -rtbufsize 100M -err_detect ignore_err -fflags +genpts -c:v ");
 		if (strcmp(s->codecs[1],"mpeg2video") == 0) {
 			strcat(ffcmd, "mpeg2_cuvid");
 		}
-		
+
 		if (strcmp(s->codecs[1],"h264") == 0) {
 			strcat(ffcmd, "h264_cuvid");
 
 		}
 		strcat(ffcmd, " -surfaces 8 -drop_second_field 1 -deint 2 ");
-	
+
 		s->rescale = get_rescale_size(s->scene_name, s->input, atoi(s->codecs[2]), atoi(s->codecs[3]));
 		if (s->rescale != NULL) {
 			strcat(ffcmd, "-resize ");
@@ -1277,19 +1331,30 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		strcat(ffcmd, "-i ");
 
 		strcat(ffcmd, s->ffinput);
-		strcat(ffcmd, " ");
-	
+		//strcat(ffcmd, " -pix_fmt yuv420p ");
+
 		// omit audio select first video stream
-		strcat(ffcmd, "-map 0:");
+		strcat(ffcmd, " -map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -tune zerolatency -force_key_frames expr:gte(t,n_forced*0.2) -g 5 -bf 2 -qp 19 -profile:v main -level 3.1 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra ");//-map 0:1 -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 ");
+		strcat(ffcmd, " -c:v rawvideo -vf format=yuv444p");
+		if (s->rescale != NULL) {
+			strcat(ffcmd, ",scale=");
+			strcat(ffcmd, s->rescale[0]);
+			strcat(ffcmd, ":");
+			strcat(ffcmd, s->rescale[1]);
+		}
+		//strcat(ffcmd, " -buffer_size 0 -force_key_frames expr:gte(t,n_forced*0.2) -g 12 -f rawvideo ");
+		//strcat(ffcmd, " -c:v hevc_nvenc -bf 0 -force_key_frames expr:gte(t,n_forced*0.2) -g 12 ");
+		strcat(ffcmd, " -flags:v +global_header -c:v h264_nvenc -zerolatency 1 -force_key_frames expr:gte(t,n_forced*0.2) -g 5 -bf 0 -qp 19 -profile:v main -level 3.1 -preset ll -movflags frag_keyframe+empty_moov+faststart -flags global_header -bsf:v dump_extra -f mpegts ");// -map 0:1 -acodec mp3 -b:a 128k -ar 44100 -reset_timestamps 1 ");
 		// -b:v 2500k -minrate 2500k -maxrate 3500k
-		strcat(ffcmd, "-f mpegts pipe:1");
+		//strcat(ffcmd, "-f ts pipe:1");
+
+		strcat(ffcmd, s->ffoutput);
 
 	}
 
 
-	recreateFIFOAndsyncFS(s->ffoutput);
+	//recreateFIFOAndsyncFS(s->ffoutput);
 
 	printf("preprocess: executing \"%s\"...\n", ffcmd);
 	s->pid = run_sync_forever2(s, ffcmd, s->ffoutput);
@@ -1299,51 +1364,119 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 	//sleep_ms(10*1000);
 
-  	time_t current_time = time(NULL);
-        char **ffcodecs = NULL;	
+	time_t current_time = time(NULL);
+	char **ffcodecs = NULL;
 	int retries = 0;
 
-	int fd, nread;
-	char buf[0x100] ;
-	fd = open(s->ffoutput, O_RDONLY);
-	
-	int flags = fcntl(fd, F_GETFL, 0);
-	fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+	//int fd, nread;
+	//fd = open(s->input, O_RDONLY);
 
-	printf("preprocessing: is %s alive?\n", s->ffoutput);
+	//int flags = fcntl(fd, F_GETFL, 0);
+	//fcntl(fd, F_SETFL, flags | O_NONBLOCK);
+
+	printf("preprocessing: is %d alive?\n", s->port);
+	//sleep_ms(15*1000);
 	int no_packet = 0;
 
 	int gave_up = 0;
 
-  	current_time = time(NULL);
-	while (1)
-    	{
-        	if (read(fd, buf, 0x100-1) > 0)
-        	{
-			break;
-        	}
-        	sleep(10);
-		if ((time(NULL) - current_time) > 20) {
-	
-			s->gave_up = 1;		
-			printf("preprocessing: %s any packet on the output for 20 secs...\n", s->ffoutput);
-			return;
+	if (1) {
+
+		int MSGBUFSIZE = 2;
+
+		struct sockaddr_in addr;
+		int fd, nbytes,addrlen;
+		struct ip_mreq mreq;
+		char msgbuf[MSGBUFSIZE];
+
+		u_int yes=1;            /*** MODIFICATION TO ORIGINAL */
+
+		/* create what looks like an ordinary UDP socket */
+		if ((fd=socket(AF_INET,SOCK_DGRAM,0)) < 0) {
+			perror("socket");
+			exit(1);
 		}
+
+
+		/**** MODIFICATION TO ORIGINAL */
+		/* allow multiple sockets to use the same PORT number */
+		if (setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)) < 0) {
+			perror("Reusing ADDR failed");
+			exit(1);
+		}
+		/*** END OF MODIFICATION TO ORIGINAL */
+
+		/* set up destination address */
+		memset(&addr,0,sizeof(addr));
+		addr.sin_family=AF_INET;
+		addr.sin_addr.s_addr=htonl(INADDR_ANY); /* N.B.: differs from sender */
+		addr.sin_port=htons(s->port);
+
+		/* bind to receive address */
+		if (bind(fd,(struct sockaddr *) &addr,sizeof(addr)) < 0) {
+			perror("bind");
+			exit(1);
+		}
+
+		/* use setsockopt() to request that the kernel join a multicast group */
+		mreq.imr_multiaddr.s_addr=inet_addr("225.0.0.37");
+		mreq.imr_interface.s_addr=htonl(INADDR_ANY);
+
+		if (setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) < 0) {
+			perror("setsockopt");
+			exit(1);
+		}
+
+		struct timeval tv;
+		tv.tv_sec = 0;
+		tv.tv_usec = 100000;
+		if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) {
+			perror("Error");
+		}
+
+
+
+		current_time = time(NULL);
+		//if (0)
+		while (1)
+		{
+
+			addrlen=sizeof(addr);
+			if ((nbytes=recvfrom(fd,msgbuf,MSGBUFSIZE,0,
+							(struct sockaddr *) &addr,&addrlen)) < 0) {
+				//perror("recvfrom");
+				//exit(1);
+				// printf("err\n");
+			}
+			if (strlen(msgbuf) != 0) {
+				break;
+			}
+
+			if ((time(NULL) - current_time) > 20) {
+
+				s->gave_up = 1;
+				printf("preprocessing: %s any packet on the output for 20 secs...\n", s->ffoutput);
+				return;
+			}
+		}
+
+		close(fd);
 	}
+	// give it some time
+	//sleep_ms(3*1000);
 
-	
-	close(fd);
 
-	sleep_ms(250);
+	//sleep_ms(250);
 
 	// must be ffprobable
-	while (ffcodecs == NULL) {
-		if (retries >=3) {
-			
-			printf("preprocessing: %s is not alive, giving up...\n", s->ffoutput);
-			s->gave_up = 1;
-			return;
-		}
+	if (0)
+		while (ffcodecs == NULL) {
+			if (retries >=3) {
+
+				printf("preprocessing: %s is not alive, giving up...\n", s->ffoutput);
+				s->gave_up = 1;
+				return;
+			}
 
 			retries++;
 			printf("preprocessing: is %s alive? retry no. %d\n", s->ffoutput, retries);
@@ -1358,37 +1491,65 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 	printf("%s is alive!\n", s->ffoutput);
 
-  	current_time = time(NULL);
-	
+	current_time = time(NULL);
+
 	mp_media_t *m = &s->media;
 
 	// this will be handled at runtime
 	if (0)
-	while(s->speed < 0.8) {
-		printf("%s waiting for %f > 0.8...\n", obs_source_get_name(s->source), s->speed);
+		while(s->speed < 0.8) {
+			printf("%s waiting for %f > 0.8...\n", obs_source_get_name(s->source), s->speed);
 
-		sleep_ms(1*1000);
-		if ((time(NULL) - current_time) > 180) {
-			// if speed will not raise quicky kill
-			s->gave_up = 1;
-			printf("preprocessing: %s < 0.8 for 10 secs , this is a candidate for restart...\n", s->ffoutput);
-			return;
+			sleep_ms(1*1000);
+			if ((time(NULL) - current_time) > 180) {
+				// if speed will not raise quicky kill
+				s->gave_up = 1;
+				printf("preprocessing: %s < 0.8 for 10 secs , this is a candidate for restart...\n", s->ffoutput);
+				return;
+			}
+
 		}
 
+	if ( s->last_frame_at == NULL ) {
+
+		// speed stabilisation
+		sleep_ms(3*1000);
+
+
+		if (preprocess_stream < s->i)
+			while  (preprocess_stream != s->i) {
+				sleep_ms(10);
+			}
+
+
+		// wait 3 secs for obs stabilization
+		sleep_ms(3*1000);
+		preprocess_stream++;
+		//return;
 	}
 
-	if (m->log != 1) {
-	
+	//if (m->log != 1) {
+	if ( s->last_frame_at == NULL ) {
+
 		printf("%s starting thread...\n", obs_source_get_name(s->source));
+
 		obs_source_output_video(s->source, NULL);
-		preprocess_stream++;
+		obs_source_update(s->source, NULL);
+		while (m == NULL || m->initialized == false) {
+			m = &s->media;
+			sleep_ms(10);
+		}
+
+
 		m->log = 1;
+		return;
 	} else {
-		if ( s->last_frame_at == NULL || ( s->real_last_frame_at != NULL && (current_time - s->real_last_frame_at) > 5) ) {
-			
+		// no need in case of UDP
+		if ( 0 && ( s->real_last_frame_at != NULL && (current_time - s->real_last_frame_at) > 60) ) {
+
 
 			printf("%s no frames for the last 5 secs! restarting...\n", obs_source_get_name(s->source));
-					
+
 			m->initialized = false;
 			m = NULL;
 			obs_source_output_video(s->source, NULL);
@@ -1399,8 +1560,9 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 			}
 
 			m->log = 1;
+			return;
 
-		} else {	
+		} else {
 			printf("%s last frame before %d secs, nothing to do\n", obs_source_get_name(s->source), (current_time - s->real_last_frame_at));
 
 		}
@@ -1435,34 +1597,37 @@ static void preprocess(struct ffmpeg_source **s_p) {
 		//wait till it is cancelled
 		void *r;
 		pthread_join(s->tid, &r);
-		
+
 		if (r == PTHREAD_CANCELED)
-		       printf("preprocess: thread was canceled\n");
+			printf("preprocess: thread was canceled\n");
 		else
-		       printf("preprocess: thread wasn't canceled\n");
-				
+			printf("preprocess: thread wasn't canceled\n");
+
 	}
 
 
 	pthread_t tid;
 	int err = pthread_create(&tid, NULL, &preprocess_thread, s);
+	//int err = 0;
+	//preprocess_thread(s);
 
 	if (err != 0)
-	    printf("preprocess: can't create thread :[%s]\n", strerror(err));
+		printf("preprocess: can't create thread :[%s]\n", strerror(err));
 	else {
-	    s->tid = tid;
-	    printf("preprocess: thread created successfully\n");
+		s->tid = tid;
+		printf("preprocess: thread created successfully\n");
 	}
 }
 
 static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 {
 
+	printf("CREATE\n");
 	UNUSED_PARAMETER(settings);
 	struct ffmpeg_source *s = bzalloc(sizeof(struct ffmpeg_source));
 	s->source = source;
 
-  s->source_frames = (double) 0;
+	s->source_frames = (double) 0;
 
 	s->hotkey = obs_hotkey_register_source(source,
 			"MediaSource.Restart",
@@ -1475,7 +1640,7 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 			get_duration, s);
 	proc_handler_add(ph, "void get_nb_frames(out int num_frames)",
 			get_nb_frames, s);
-	ffmpeg_source_update(s, settings);
+	ffmpeg_source_update2(s, settings);
 
 
 	/**
@@ -1484,13 +1649,18 @@ static void *ffmpeg_source_create(obs_data_t *settings, obs_source_t *source)
 	bool opt_preprocess = get_opt_preprocess();
 	if (opt_preprocess) {
 		s->i = (int) obs_data_get_int(settings, "i");
+		s->port = (int) obs_data_get_int(settings, "port");
+
 		s->gave_up = 0;
 		s->scene_name =  (char *)obs_data_get_string(settings, "scene_name");
 		char *ffinput = malloc(sizeof(char)*(strlen((char *)obs_data_get_string(settings, "ffinput"))+100));
 		strcpy(ffinput, (char *)obs_data_get_string(settings, "ffinput"));
 
-		int *size = (int*) malloc(sizeof(int));
-		char **data = explode('?', ffinput, &size);
+
+		char **data = NULL;
+		int size = split(ffinput, '?', &data);
+
+
 		if (size == 2) {
 			strcpy(ffinput, data[0]);
 		}
@@ -1527,6 +1697,9 @@ static void ffmpeg_source_destroy(void *data)
 
 static void ffmpeg_source_activate(void *data)
 {
+
+	printf("ACTIVATE\n");
+	return;
 	struct ffmpeg_source *s = data;
 
 	if (s->restart_on_activate)
@@ -1551,7 +1724,7 @@ struct obs_source_info ffmpeg_source = {
 	.id             = "ffmpeg_source",
 	.type           = OBS_SOURCE_TYPE_INPUT,
 	.output_flags   = OBS_SOURCE_ASYNC_VIDEO | OBS_SOURCE_AUDIO |
-	                  OBS_SOURCE_DO_NOT_DUPLICATE,
+		OBS_SOURCE_DO_NOT_DUPLICATE,
 	.get_name       = ffmpeg_source_getname,
 	.create         = ffmpeg_source_create,
 	.destroy        = ffmpeg_source_destroy,
