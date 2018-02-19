@@ -1336,8 +1336,8 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 		// omit audio select first video stream
 		strcat(ffcmd, " -map 0:");
 		strcat(ffcmd, s->codecs[0]);
-		strcat(ffcmd, " -c:v rawvideo -vf format=yuv444p");
-		if (s->rescale != NULL) {
+		//strcat(ffcmd, " -c:v rawvideo -vf format=yuv444p");
+		if (0 && s->rescale != NULL) {
 			strcat(ffcmd, ",scale=");
 			strcat(ffcmd, s->rescale[0]);
 			strcat(ffcmd, ":");
