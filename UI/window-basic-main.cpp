@@ -723,6 +723,34 @@ static void syncfs() {
 	pclose(fp);
 }
 
+int get_last_ip_octet() {
+	char *cmd = (char*) malloc(500*sizeof(char));
+	strcpy(cmd, "ip addr show dev \"`awk '$2 == 00000000 { print $1 }' /proc/net/route`\" | awk '$1 ~ /^inet/ { sub(\"/.*\", \"\", $2); print $2 }' | head -1  | cut -d . -f 4 | awk '{printf $1}'");
+
+        printf("get_last_ip_octet: executing '%s'\n", cmd);
+        
+        FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("get_last_ip_octet: failed to run command\n" );
+                return 1125;
+        }
+        
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("'%s'\n", temp);
+        }
+
+        pclose(fp);
+
+	int port = atoi(temp);
+	port = port * 12;
+	if (port == 0) return 1125;
+	else {
+		printf("port %d\n", port);
+		return port;
+	}
+
+}
 
 
 static void mkdir_p(char *path) {
@@ -785,6 +813,7 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 			{
 				fread (buffer, 1, length, f);
 			}
+			buffer[length] = '\0';
 			fclose (f);
 		}
 
@@ -813,6 +842,9 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 	count = obs_data_array_count(array);
 	da_reserve(sources, count);
 
+
+	int port = get_last_ip_octet();
+
 	for (i = 0; i < count; i++) {
 		obs_data_t   *source_data = obs_data_array_item(array, i);
 		obs_data_t *settings = obs_data_get_obj(source_data, "settings");
@@ -837,7 +869,6 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 				//strcat(fifo, obs_data_get_string(source_data, "name"));
 				//mkfifo(fifo, 0666);
 
-				int port = 1125;
 				port = port + num_streams;
 
 				char port_str[12];
