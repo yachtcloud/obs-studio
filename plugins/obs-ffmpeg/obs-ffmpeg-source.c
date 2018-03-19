@@ -691,6 +691,8 @@ static void get_nb_frames(void *data, calldata_t *cd)
 	calldata_set_int(cd, "num_frames", frames);
 }
 
+
+
 int split (const char *str, char c, char ***arr)
 {
 	int count = 1;
@@ -707,7 +709,7 @@ int split (const char *str, char c, char ***arr)
 		p++;
 	}
 
-	*arr = (char**) malloc(sizeof(char*) * count);
+	*arr = (char**) calloc(count, sizeof(char*));
 	if (*arr == NULL)
 		exit(1);
 
@@ -716,7 +718,7 @@ int split (const char *str, char c, char ***arr)
 	{
 		if (*p == c)
 		{
-			(*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+			(*arr)[i] = (char*) calloc(token_len, sizeof(char) );
 			if ((*arr)[i] == NULL)
 				exit(1);
 
@@ -726,7 +728,7 @@ int split (const char *str, char c, char ***arr)
 		p++;
 		token_len++;
 	}
-	(*arr)[i] = (char*) malloc( sizeof(char) * token_len );
+	(*arr)[i] = (char*) calloc(token_len, sizeof(char) );
 	if ((*arr)[i] == NULL)
 		exit(1);
 
@@ -1103,7 +1105,7 @@ static char ** probe(char *input, int reprobe, char timeout[]) {
 			fclose(fp);
 		}
 
-
+	
 		printf("probe: got codec %s, %sx%s, index %s\n", data[1], data[2], data[3], data[0]);
 	} else {
 		printf("probe: failed to probe '%s'\n", input);
@@ -1382,85 +1384,122 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 
 	if (1) {
 
-		int MSGBUFSIZE = 2;
+        if (0) {
+			int MSGBUFSIZE = 2;
 
-		struct sockaddr_in addr;
-		int fd, nbytes,addrlen;
-		struct ip_mreq mreq;
-		char msgbuf[MSGBUFSIZE];
+			struct sockaddr_in addr;
+			int fd, nbytes,addrlen;
+			struct ip_mreq mreq;
+			char msgbuf[MSGBUFSIZE];
 
-		u_int yes=1;            /*** MODIFICATION TO ORIGINAL */
+			u_int yes=1;            /*** MODIFICATION TO ORIGINAL */
 
-		/* create what looks like an ordinary UDP socket */
-		if ((fd=socket(AF_INET,SOCK_DGRAM,0)) < 0) {
-			perror("socket");
-			exit(1);
-		}
-
-
-		/**** MODIFICATION TO ORIGINAL */
-		/* allow multiple sockets to use the same PORT number */
-		if (setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)) < 0) {
-			perror("Reusing ADDR failed");
-			exit(1);
-		}
-		/*** END OF MODIFICATION TO ORIGINAL */
-
-		/* set up destination address */
-		memset(&addr,0,sizeof(addr));
-		addr.sin_family=AF_INET;
-		addr.sin_addr.s_addr=htonl(INADDR_ANY); /* N.B.: differs from sender */
-		addr.sin_port=htons(s->port);
-
-		/* bind to receive address */
-		if (bind(fd,(struct sockaddr *) &addr,sizeof(addr)) < 0) {
-			perror("bind");
-			exit(1);
-		}
-
-		/* use setsockopt() to request that the kernel join a multicast group */
-		mreq.imr_multiaddr.s_addr=inet_addr("225.0.0.37");
-		mreq.imr_interface.s_addr=htonl(INADDR_ANY);
-
-		if (setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) < 0) {
-			perror("setsockopt");
-			exit(1);
-		}
-
-		struct timeval tv;
-		tv.tv_sec = 0;
-		tv.tv_usec = 100000;
-		if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) {
-			perror("Error");
-		}
+			/* create what looks like an ordinary UDP socket */
+			if ((fd=socket(AF_INET,SOCK_DGRAM,0)) < 0) {
+				perror("socket");
+				exit(1);
+			}
 
 
+			/**** MODIFICATION TO ORIGINAL */
+			/* allow multiple sockets to use the same PORT number */
+			if (setsockopt(fd,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)) < 0) {
+				perror("Reusing ADDR failed");
+				exit(1);
+			}
+			/*** END OF MODIFICATION TO ORIGINAL */
+
+			/* set up destination address */
+			memset(&addr,0,sizeof(addr));
+			addr.sin_family=AF_INET;
+			addr.sin_addr.s_addr=htonl(INADDR_ANY); /* N.B.: differs from sender */
+			addr.sin_port=htons(s->port);
+
+			/* bind to receive address */
+			if (bind(fd,(struct sockaddr *) &addr,sizeof(addr)) < 0) {
+				perror("bind");
+				exit(1);
+			}
+
+			/* use setsockopt() to request that the kernel join a multicast group */
+			mreq.imr_multiaddr.s_addr=inet_addr("225.0.0.37");
+			mreq.imr_interface.s_addr=htonl(INADDR_ANY);
+
+			if (setsockopt(fd,IPPROTO_IP,IP_ADD_MEMBERSHIP,&mreq,sizeof(mreq)) < 0) {
+				perror("setsockopt");
+				exit(1);
+			}
+
+			struct timeval tv;
+			tv.tv_sec = 0;
+			tv.tv_usec = 100000;
+			if (setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO,&tv,sizeof(tv)) < 0) {
+				perror("Error");
+			}
+        }
 
 		current_time = time(NULL);
 		//if (0)
 		while (1)
 		{
 
-			addrlen=sizeof(addr);
-			if ((nbytes=recvfrom(fd,msgbuf,MSGBUFSIZE,0,
-							(struct sockaddr *) &addr,&addrlen)) < 0) {
-				//perror("recvfrom");
-				//exit(1);
-				// printf("err\n");
-			}
-			if (strlen(msgbuf) != 0) {
+
+            struct sockaddr_in si_me, si_other;
+            int so, i, blen;
+            socklen_t slen;
+            char buf[100];
+            so = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+            struct timeval tv;
+            tv.tv_sec = 1;
+            tv.tv_usec = 0;
+
+            u_int yes = 1;
+           
+            setsockopt(so, SOL_SOCKET, SO_RCVTIMEO, (const char*)&tv, sizeof tv);
+            if (setsockopt(so,SOL_SOCKET,SO_REUSEADDR,&yes,sizeof(yes)) < 0) {
+                printf("Reusing ADDR failed\n");
+            }
+
+            memset((char *) &si_me, 0, sizeof(si_me));
+            si_me.sin_family = AF_INET;
+
+            int prt = s->port;
+            si_me.sin_port = htons(prt);
+            
+            if (bind(so, (struct sockaddr*) &si_me, sizeof(si_me))==-1)
+                printf("bind");
+
+			int res = recvfrom(so, buf, sizeof(buf), 0, (struct sockaddr*) &si_other, &slen);
+
+		    close(so);
+
+            printf("res port %d : %d\n", prt, res);
+			if (res > 0) {
 				break;
 			}
 
-			if ((time(NULL) - current_time) > 20) {
 
+			if (0) {
+				//addrlen=sizeof(addr);
+				//if ((nbytes=recvfrom(fd,msgbuf,MSGBUFSIZE,0,
+				//				(struct sockaddr *) &addr,&addrlen)) < 0) {
+				//}
+				//if (strlen(msgbuf) != 0) {
+				//	break;
+				//}
+			}
+            sleep_ms(1000);
+
+			if ((time(NULL) - current_time) > 20) {
+                break;
 				s->gave_up = 1;
 				printf("preprocessing: %s any packet on the output for 20 secs...\n", s->ffoutput);
 				return;
 			}
+
 		}
 
-		close(fd);
+		//close(fd);
 	}
 	// give it some time
 	//sleep_ms(3*1000);

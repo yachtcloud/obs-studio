@@ -876,13 +876,13 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 
 
 				char *ffout =  (char*) malloc(200*sizeof(char));
-				strcpy(ffout, "udp://225.0.0.37:");
+				strcpy(ffout, "udp://127.0.0.1:");
 				strcat(ffout, port_str);
 				strcat(ffout, "?pkt_size=1316");
 
 
 				char *in =  (char*) malloc(200*sizeof(char));
-				strcpy(in, "udp://225.0.0.37:");
+				strcpy(in, "udp://127.0.0.1:");
 				strcat(in, port_str);
 				strcat(in, "?buffer_size=1000000&fifo_size=1000000&overrun_nonfatal=1&timeout=300000000&reuse=1");
 
