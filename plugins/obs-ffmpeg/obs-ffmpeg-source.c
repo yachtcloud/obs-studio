@@ -1040,7 +1040,7 @@ int file_exists (char *filename)
 
 
 static char ** probe(char *input, int reprobe, char timeout[]) {
-
+    reprobe = 1;
 	char *cmdres;
 	char *input_hash = (char *) malloc(1000*sizeof(char));
 	strcpy(input_hash, input);
