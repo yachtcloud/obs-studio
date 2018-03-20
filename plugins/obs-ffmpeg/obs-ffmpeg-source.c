@@ -1279,6 +1279,7 @@ void *preprocess_thread(struct ffmpeg_source *s) {
 	pthread_setcancelstate(PTHREAD_CANCEL_ENABLE, NULL);
 
 	if (!get_opt_copy()) {
+        s->codecs = NULL;
 		while (s->codecs == NULL) {
 			printf("preprocessing: trying to probe...\n");
 			s->codecs = can_preprocess(s->ffinput, 0, "20");
