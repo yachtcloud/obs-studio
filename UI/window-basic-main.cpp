@@ -752,6 +752,26 @@ int get_last_ip_octet() {
 
 }
 
+static void clean_obsbrowser() {
+	//rm /dev/shm/obslinuxbrowser*
+	
+	char *cmd = (char*) malloc(100*sizeof(char));
+	strcpy(cmd, "rm -f /dev/shm/obslinuxbrowser*");
+	
+	FILE *fp = popen(cmd, "r");
+        if (fp == NULL) {
+                printf("clean_obsbrowser: failed to run command\n" );
+                return;
+        }
+
+        char temp[1035];
+        while (fgets(temp, sizeof(temp)-1, fp) != NULL) {
+                printf("%s\n", temp);
+        }
+
+        pclose(fp);
+
+}
 
 static void mkdir_p(char *path) {
 
@@ -796,6 +816,7 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 
 	if (enabled) {
 
+		clean_obsbrowser();
 		mkdir_p("/tmp/obs");
 
 
