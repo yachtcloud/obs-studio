@@ -865,6 +865,8 @@ obs_data_array_t *preprocess_sources(obs_data_array_t *array, char *scene_name) 
 
 
 	int port = get_last_ip_octet();
+	// below 1024 permission denied
+	port = port + 1024;
 
 	for (i = 0; i < count; i++) {
 		obs_data_t   *source_data = obs_data_array_item(array, i);
